@@ -17,114 +17,152 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 
-from __future__ import print_function
-import sys
+from collections import (
+    OrderedDict,
+    deque,
+    namedtuple,
+)
+import logging
 import os
-from collections import deque
+from threading import Lock
+
 from PyQt5 import QtCore
-from picard.util import thread
 
 
-LOG_INFO = 1
-LOG_WARNING = 2
-LOG_ERROR = 4
-LOG_DEBUG = 8
+_MAX_TAIL_LEN = 10**6
+
+VERBOSITY_DEFAULT = logging.WARNING
 
 
-class Logger(object):
-
-    def __init__(self, maxlen=0):
-        self._receivers = []
-        self.maxlen = maxlen
-        self.reset()
-
-    def reset(self):
-        if self.maxlen > 0:
-            self.entries = deque(maxlen=self.maxlen)
-        else:
-            self.entries = []
-
-    def register_receiver(self, receiver):
-        self._receivers.append(receiver)
-
-    def unregister_receiver(self, receiver):
-        self._receivers.remove(receiver)
-
-    def message(self, level, message, *args):
-        if not self.log_level(level):
-            return
-        if not isinstance(message, str):
-            message = repr(message)
-        if args:
-            message = message % args
-        time = QtCore.QTime.currentTime()
-        message = "%s" % (message,)
-        self.entries.append((level, time, message))
-        for func in self._receivers:
-            try:
-                thread.to_main(func, level, time, message)
-            except:
-                import traceback
-                traceback.print_exc()
-
-    def log_level(self, level):
-        return True
+def set_level(level):
+    main_logger.setLevel(level)
 
 
-# main logger
-log_levels = LOG_INFO | LOG_WARNING | LOG_ERROR
-
-main_logger = Logger(50000)
-main_logger.log_level = lambda level: log_levels & level
+def get_effective_level():
+    return main_logger.getEffectiveLevel()
 
 
-def debug(message, *args):
-    main_logger.message(LOG_DEBUG, message, *args)
+_feat = namedtuple('_feat', ['name', 'prefix', 'color_key'])
+
+levels_features = OrderedDict([
+    (logging.ERROR,   _feat('Error',   'E', 'log_error')),
+    (logging.WARNING, _feat('Warning', 'W', 'log_warning')),
+    (logging.INFO,    _feat('Info',    'I', 'log_info')),
+    (logging.DEBUG,   _feat('Debug',   'D', 'log_debug')),
+])
 
 
-def info(message, *args):
-    main_logger.message(LOG_INFO, message, *args)
+# COMMON CLASSES
 
 
-def warning(message, *args):
-    main_logger.message(LOG_WARNING, message, *args)
+TailLogTuple = namedtuple(
+    'TailLogTuple', ['pos', 'message', 'level'])
 
 
-def error(message, *args):
-    main_logger.message(LOG_ERROR, message, *args)
+class TailLogHandler(logging.Handler):
+
+    def __init__(self, log_queue, tail_logger, log_queue_lock):
+        super().__init__()
+        self.log_queue = log_queue
+        self.tail_logger = tail_logger
+        self.log_queue_lock = log_queue_lock
+        self.pos = 0
+
+    def emit(self, record):
+        with self.log_queue_lock:
+            self.log_queue.append(
+                TailLogTuple(
+                    self.pos,
+                    self.format(record),
+                    record.levelno
+                )
+            )
+            self.pos += 1
+        self.tail_logger.updated.emit()
 
 
-_log_prefixes = {
-    LOG_INFO: 'I',
-    LOG_WARNING: 'W',
-    LOG_ERROR: 'E',
-    LOG_DEBUG: 'D',
-}
+class TailLogger(QtCore.QObject):
+    updated = QtCore.pyqtSignal()
+
+    def __init__(self, maxlen):
+        super().__init__()
+        self._log_queue = deque(maxlen=maxlen)
+        self._queue_lock = Lock()
+        self.log_handler = TailLogHandler(self._log_queue, self, self._queue_lock)
+
+    def contents(self, prev=-1):
+        with self._queue_lock:
+            contents = [x for x in self._log_queue if x.pos > prev]
+        return contents
+
+    def clear(self):
+        with self._queue_lock:
+            self._log_queue.clear()
 
 
-def formatted_log_line(level, time, message, timefmt='hh:mm:ss',
-                       level_prefixes=_log_prefixes, format='%s %s'):
-    msg = format % (time.toString(timefmt), message)
-    if level_prefixes:
-        return "%s: %s" % (level_prefixes[level], msg)
-    else:
-        return msg
+# MAIN LOGGER
+
+main_logger = logging.getLogger('main')
+
+main_logger.setLevel(logging.INFO)
 
 
-def _stderr_receiver(level, time, msg):
-    try:
-        sys.stderr.write(formatted_log_line(level, time, msg) + os.linesep)
-    except (UnicodeDecodeError, UnicodeEncodeError):
-        sys.stderr.write(formatted_log_line(level, time, msg, format='%s %r') + os.linesep)
+def name_filter(record):
+    # provide a significant name from the filepath of the module
+    name, _ = os.path.splitext(os.path.normpath(record.pathname))
+    prefix = os.path.normpath(__package__)
+    # In case the module exists within picard, remove the picard prefix
+    # else, in case of something like a plugin, keep the path as it is.
+    if name.startswith(prefix):
+        name = name[len(prefix) + 1:].replace(os.sep, ".").replace('.__init__', '')
+    record.name = name
+    return True
 
 
-main_logger.register_receiver(_stderr_receiver)
+main_logger.addFilter(name_filter)
+
+main_tail = TailLogger(_MAX_TAIL_LEN)
+
+main_fmt = '%(levelname).1s: %(asctime)s,%(msecs)03d %(name)s.%(funcName)s:%(lineno)d: %(message)s'
+main_time_fmt = '%H:%M:%S'
+main_inapp_fmt = main_fmt
+main_inapp_time_fmt = main_time_fmt
+
+main_handler = main_tail.log_handler
+main_formatter = logging.Formatter(main_inapp_fmt, main_inapp_time_fmt)
+main_handler.setFormatter(main_formatter)
+
+main_logger.addHandler(main_handler)
+
+main_console_handler = logging.StreamHandler()
+main_console_formatter = logging.Formatter(main_fmt, main_time_fmt)
+
+main_console_handler.setFormatter(main_console_formatter)
+
+main_logger.addHandler(main_console_handler)
 
 
-# history of status messages
-history_logger = Logger(50000)
-history_logger.log_level = lambda level: log_levels & level
+debug = main_logger.debug
+info = main_logger.info
+warning = main_logger.warning
+error = main_logger.error
+exception = main_logger.exception
+log = main_logger.log
+
+# HISTORY LOGGING
+
+
+history_logger = logging.getLogger('history')
+history_logger.setLevel(logging.INFO)
+
+history_tail = TailLogger(_MAX_TAIL_LEN)
+
+history_handler = history_tail.log_handler
+history_formatter = logging.Formatter('%(asctime)s - %(message)s')
+history_handler.setFormatter(history_formatter)
+
+history_logger.addHandler(history_handler)
 
 
 def history_info(message, *args):
-    history_logger.message(LOG_INFO, message, *args)
+    history_logger.info(message, *args)

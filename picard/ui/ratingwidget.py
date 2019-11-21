@@ -17,17 +17,25 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 
-from PyQt5 import QtCore, QtGui, QtWidgets
+from PyQt5 import (
+    QtCore,
+    QtGui,
+    QtWidgets,
+)
+
 from picard import config
 
 
 class RatingWidget(QtWidgets.QWidget):
 
     def __init__(self, parent, track):
-        QtWidgets.QWidget.__init__(self, parent)
+        super().__init__(parent)
         self._track = track
         self._maximum = config.setting["rating_steps"] - 1
-        self._rating = int(track.metadata["~rating"] or 0)
+        try:
+            self._rating = int(track.metadata["~rating"] or 0)
+        except ValueError:
+            self._rating = 0
         self._highlight = 0
         self._star_pixmap = QtGui.QPixmap(":/images/star.png")
         self._star_gray_pixmap = QtGui.QPixmap(":/images/star-gray.png")
@@ -79,7 +87,10 @@ class RatingWidget(QtWidgets.QWidget):
 
     def _update_track(self):
         track = self._track
-        track.metadata["~rating"] = string_(self._rating)
+        rating = str(self._rating)
+        track.metadata["~rating"] = rating
+        for file in track.linked_files:
+            file.metadata["~rating"] = rating
         if config.setting["submit_ratings"]:
             ratings = {("recording", track.id): self._rating}
             self.tagger.mb_api.submit_ratings(ratings, None)

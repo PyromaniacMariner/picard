@@ -17,11 +17,18 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 
+import builtins
 import gettext
 import locale
 import os.path
-import sys
-import builtins
+
+from PyQt5.QtCore import QLocale
+
+from picard.const.sys import (
+    IS_MACOS,
+    IS_WIN,
+)
+
 
 builtins.__dict__['N_'] = lambda a: a
 
@@ -29,73 +36,62 @@ builtins.__dict__['N_'] = lambda a: a
 def setup_gettext(localedir, ui_language=None, logger=None):
     """Setup locales, load translations, install gettext functions."""
     if not logger:
-        logger = lambda *a, **b: None  # noop
+        logger = lambda *a, **b: None  # noqa: E731
     current_locale = ''
     if ui_language:
-        os.environ['LANGUAGE'] = ''
-        os.environ['LANG'] = ui_language
         try:
             current_locale = locale.normalize(ui_language + '.' + locale.getpreferredencoding())
             locale.setlocale(locale.LC_ALL, current_locale)
-        except:
-            pass
-    if sys.platform == "win32":
-        from ctypes import windll
-        try:
-            current_locale = locale.windows_locale[windll.kernel32.GetUserDefaultUILanguage()]
-            locale.setlocale(locale.LC_ALL, current_locale)
-        except KeyError:
-            os.environ["LANG"] = locale.getdefaultlocale()[0]
+        except Exception as e:
+            logger(e)
+    else:
+        if IS_WIN:
+            from ctypes import windll
             try:
-                current_locale = locale.setlocale(locale.LC_ALL, "")
-            except:
-                pass
-        except:
-            pass
-    elif not ui_language:
-        if sys.platform == "darwin":
+                current_locale = locale.windows_locale[windll.kernel32.GetUserDefaultUILanguage()]
+                current_locale += '.' + locale.getpreferredencoding()
+                locale.setlocale(locale.LC_ALL, current_locale)
+            except KeyError:
+                try:
+                    current_locale = locale.setlocale(locale.LC_ALL, '')
+                except Exception as e:
+                    logger(e)
+            except Exception as e:
+                logger(e)
+        elif IS_MACOS:
             try:
                 import Foundation
                 defaults = Foundation.NSUserDefaults.standardUserDefaults()
-                os.environ["LANG"] = \
-                    defaults.objectForKey_("AppleLanguages")[0]
-            except:
-                pass
-        try:
-            current_locale = locale.setlocale(locale.LC_ALL, "")
-        except:
-            pass
+                current_locale = defaults.objectForKey_('AppleLanguages')[0]
+                current_locale = current_locale.replace('-', '_')
+                locale.setlocale(locale.LC_ALL, current_locale)
+            except Exception as e:
+                logger(e)
+        else:
+            try:
+                locale.setlocale(locale.LC_ALL, '')
+                current_locale = '.'.join(locale.getlocale(locale.LC_MESSAGES))
+            except Exception as e:
+                logger(e)
+    os.environ['LANGUAGE'] = os.environ['LANG'] = current_locale
+    QLocale.setDefault(QLocale(current_locale))
     logger("Using locale %r", current_locale)
     try:
         logger("Loading gettext translation, localedir=%r", localedir)
         trans = gettext.translation("picard", localedir)
-        trans.install(True)
-        _ngettext = trans.ngettext
         logger("Loading gettext translation (picard-countries), localedir=%r", localedir)
         trans_countries = gettext.translation("picard-countries", localedir)
-        _gettext_countries = trans_countries.gettext
         logger("Loading gettext translation (picard-attributes), localedir=%r", localedir)
         trans_attributes = gettext.translation("picard-attributes", localedir)
-        _gettext_attributes = trans_attributes.gettext
     except IOError as e:
         logger(e)
-        builtins.__dict__['_'] = lambda a: a
+        trans = gettext.NullTranslations()
+        trans_countries = gettext.NullTranslations()
+        trans_attributes = gettext.NullTranslations()
 
-        def _ngettext(a, b, c):
-            if c == 1:
-                return a
-            else:
-                return b
-
-        def _gettext_countries(msg):
-            return msg
-
-        def _gettext_attributes(msg):
-            return msg
-
-    builtins.__dict__['ngettext'] = _ngettext
-    builtins.__dict__['gettext_countries'] = _gettext_countries
-    builtins.__dict__['gettext_attributes'] = _gettext_attributes
+    trans.install(['ngettext'])
+    builtins.__dict__['gettext_countries'] = trans_countries.gettext
+    builtins.__dict__['gettext_attributes'] = trans_attributes.gettext
 
     logger("_ = %r", _)
     logger("N_ = %r", N_)
@@ -110,6 +106,8 @@ def setup_gettext(localedir, ui_language=None, logger=None):
 # strings due to that
 # This workaround is a hack until we get proper msgctxt support
 _CONTEXT_SEPARATOR = "\x04"
+
+
 def gettext_ctxt(gettext_, message, context=None):
     if context is None:
         return gettext_(message)

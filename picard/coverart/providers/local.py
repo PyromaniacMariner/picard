@@ -19,10 +19,15 @@
 
 import os
 import re
+
 from picard import config
-from picard.coverart.providers import CoverArtProvider, ProviderOptions
-from picard.coverart.image import CoverArtImageFromFile
+from picard.coverart.image import LocalFileCoverArtImage
+from picard.coverart.providers import (
+    CoverArtProvider,
+    ProviderOptions,
+)
 from picard.coverart.utils import CAA_TYPES
+
 from picard.ui.ui_provider_options_local import Ui_LocalOptions
 
 
@@ -41,7 +46,7 @@ class ProviderOptionsLocal(ProviderOptions):
     _options_ui = Ui_LocalOptions
 
     def __init__(self, parent=None):
-        super(ProviderOptionsLocal, self).__init__(parent)
+        super().__init__(parent)
         self.init_regex_checker(self.ui.local_cover_regex_edit, self.ui.local_cover_regex_error)
         self.ui.local_cover_regex_default.clicked.connect(self.set_local_cover_regex_default)
 
@@ -59,16 +64,12 @@ class CoverArtProviderLocal(CoverArtProvider):
 
     """Get cover art from local files"""
 
-    NAME = "Local"
+    NAME = "Local Files"
     TITLE = N_("Local Files")
     OPTIONS = ProviderOptionsLocal
 
     _types_split_re = re.compile('[^a-z0-9]', re.IGNORECASE)
     _known_types = set([t['name'] for t in CAA_TYPES])
-
-    def enabled(self):
-        enabled = CoverArtProvider.enabled(self)
-        return enabled and not self.coverart.front_image_found
 
     def queue_images(self):
         _match_re = re.compile(config.setting['local_cover_regex'], re.IGNORECASE)
@@ -86,10 +87,12 @@ class CoverArtProviderLocal(CoverArtProvider):
                         continue
                     filepath = os.path.join(current_dir, root, filename)
                     if os.path.exists(filepath):
-                        types = self.get_types(m.group(1)) or [ 'front' ]
-                        self.queue_put(CoverArtImageFromFile(filepath,
-                                                             types=types,
-                                                             support_types=True))
+                        types = self.get_types(m.group(1)) or ['front']
+                        self.queue_put(
+                            LocalFileCoverArtImage(filepath,
+                                                   types=types,
+                                                   support_types=True,
+                                                   support_multi_types=True))
         return CoverArtProvider.FINISHED
 
     def get_types(self, string):

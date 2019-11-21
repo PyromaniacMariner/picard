@@ -17,8 +17,8 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 
-import struct
 from io import BytesIO
+import struct
 
 
 class IdentificationError(Exception):
@@ -81,10 +81,10 @@ def identify(data):
         jpeg.read(2)
         b = jpeg.read(1)
         try:
-            while (b and ord(b) != 0xDA):  # Start Of Scan (SOS)
-                while (ord(b) != 0xFF):
+            while b and ord(b) != 0xDA:  # Start Of Scan (SOS)
+                while ord(b) != 0xFF:
                     b = jpeg.read(1)
-                while (ord(b) == 0xFF):
+                while ord(b) == 0xFF:
                     b = jpeg.read(1)
                 if ord(b) in (0xC0, 0xC1, 0xC2, 0xC5, 0xC6, 0xC7,
                               0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF):

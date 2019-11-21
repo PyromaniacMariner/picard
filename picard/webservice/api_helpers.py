@@ -18,18 +18,29 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 
 import re
+
 from PyQt5.QtCore import QUrl
-from picard import config, PICARD_VERSION_STR
-from picard.const import (ACOUSTID_KEY,
-                          ACOUSTID_HOST,
-                          ACOUSTID_PORT,
-                          CAA_HOST,
-                          CAA_PORT)
 
-from picard.webservice import CLIENT_STRING, REQUEST_DELAY_MINIMUM, DEFAULT_RESPONSE_PARSER_TYPE
+from picard import (
+    PICARD_VERSION_STR,
+    config,
+)
+from picard.const import (
+    ACOUSTID_HOST,
+    ACOUSTID_KEY,
+    ACOUSTID_PORT,
+    CAA_HOST,
+    CAA_PORT,
+)
+from picard.webservice import (
+    CLIENT_STRING,
+    DEFAULT_RESPONSE_PARSER_TYPE,
+    ratecontrol,
+)
 
-REQUEST_DELAY_MINIMUM[(ACOUSTID_HOST, ACOUSTID_PORT)] = 333
-REQUEST_DELAY_MINIMUM[(CAA_HOST, CAA_PORT)] = 0
+
+ratecontrol.set_minimum_delay((ACOUSTID_HOST, ACOUSTID_PORT), 333)
+ratecontrol.set_minimum_delay((CAA_HOST, CAA_PORT), 0)
 
 
 def escape_lucene_query(text):
@@ -37,52 +48,70 @@ def escape_lucene_query(text):
 
 
 def _wrap_xml_metadata(data):
-    return ('<?xml version="1.0" encoding="UTF-8"?>' +
-            '<metadata xmlns="http://musicbrainz.org/ns/mmd-2.0#">%s</metadata>' % data)
+    return ('<?xml version="1.0" encoding="UTF-8"?>'
+            '<metadata xmlns="http://musicbrainz.org/ns/mmd-2.0#">%s</metadata>'
+            % data)
 
 
 class APIHelper(object):
 
     def __init__(self, host, port, api_path, webservice):
-        self.host = host
-        self.port = port
+        self._host = host
+        self._port = port
         self.api_path = api_path
         self._webservice = webservice
 
+    @property
+    def host(self):
+        return self._host
+
+    @property
+    def port(self):
+        return self._port
+
     def get(self, path_list, handler, priority=False, important=False, mblogin=False,
-                cacheloadcontrol=None, refresh=False, queryargs=None, parse_response_type=DEFAULT_RESPONSE_PARSER_TYPE):
+            cacheloadcontrol=None, refresh=False, queryargs=None, parse_response_type=DEFAULT_RESPONSE_PARSER_TYPE):
         path = self.api_path + "/".join(path_list)
         return self._webservice.get(self.host, self.port, path, handler,
-                 priority=priority, important=important, mblogin=mblogin,
-                 refresh=refresh, queryargs=queryargs, parse_response_type=parse_response_type)
+                                    priority=priority, important=important, mblogin=mblogin,
+                                    refresh=refresh, queryargs=queryargs, parse_response_type=parse_response_type)
 
     def post(self, path_list, data, handler, priority=False, important=False,
-                 mblogin=True, queryargs=None, parse_response_type=DEFAULT_RESPONSE_PARSER_TYPE):
+             mblogin=True, queryargs=None, parse_response_type=DEFAULT_RESPONSE_PARSER_TYPE,
+             request_mimetype=None):
         path = self.api_path + "/".join(path_list)
         return self._webservice.post(self.host, self.port, path, data, handler,
-                  priority=priority, important=important, mblogin=mblogin,
-                  queryargs=queryargs, parse_response_type=parse_response_type)
+                                     priority=priority, important=important, mblogin=mblogin,
+                                     queryargs=queryargs, parse_response_type=parse_response_type,
+                                     request_mimetype=request_mimetype)
 
     def put(self, path_list, data, handler, priority=True, important=False,
-                mblogin=True, queryargs=None):
+            mblogin=True, queryargs=None, request_mimetype=None):
         path = self.api_path + "/".join(path_list)
         return self._webservice.put(self.host, self.port, path, data, handler,
-                 priority=priority, important=important, mblogin=mblogin,
-                 queryargs=queryargs)
+                                    priority=priority, important=important, mblogin=mblogin,
+                                    queryargs=queryargs, request_mimetype=request_mimetype)
 
     def delete(self, path_list, handler, priority=True, important=False,
-                   mblogin=True, queryargs=None):
+               mblogin=True, queryargs=None):
         path = self.api_path + "/".join(path_list)
         return self._webservice.delete(self.host, self.port, path, handler,
-                 priority=priority, important=important, mblogin=mblogin,
-                 queryargs=queryargs)
+                                       priority=priority, important=important, mblogin=mblogin,
+                                       queryargs=queryargs)
 
 
 class MBAPIHelper(APIHelper):
 
     def __init__(self, webservice):
-        super().__init__(config.setting['server_host'], config.setting['server_port'],
-                                  "/ws/2/", webservice)
+        super().__init__(None, None, "/ws/2/", webservice)
+
+    @property
+    def host(self):
+        return config.setting['server_host']
+
+    @property
+    def port(self):
+        return config.setting['server_port']
 
     def _get_by_id(self, entitytype, entityid, handler, inc=None, queryargs=None,
                    priority=False, important=False, mblogin=False, refresh=False):
@@ -140,12 +169,12 @@ class MBAPIHelper(APIHelper):
             filters.append(("query", query))
         queryargs = {}
         for name, value in filters:
-            value = QUrl.toPercentEncoding(string_(value))
-            queryargs[string_(name)] = value
+            queryargs[name] = bytes(QUrl.toPercentEncoding(str(value))).decode()
+
         path_list = [entitytype]
         return self.get(path_list, handler, queryargs=queryargs,
-                            priority=True, important=True, mblogin=False,
-                            refresh=False)
+                        priority=True, important=True, mblogin=False,
+                        refresh=False)
 
     def find_releases(self, handler, **kwargs):
         return self._find('release', handler, **kwargs)
@@ -162,8 +191,8 @@ class MBAPIHelper(APIHelper):
         if inc:
             queryargs["inc"] = "+".join(inc)
         return self.get(path_list, handler, queryargs=queryargs,
-                            priority=True, important=True, mblogin=False,
-                            refresh=False)
+                        priority=True, important=True, mblogin=False,
+                        refresh=False)
 
     def browse_releases(self, handler, **kwargs):
         inc = ["media", "labels"]
@@ -176,7 +205,9 @@ class MBAPIHelper(APIHelper):
             (i[1], j*20) for i, j in ratings.items() if i[0] == 'recording']))
 
         data = _wrap_xml_metadata('<recording-list>%s</recording-list>' % recordings)
-        return self.post(path_list, data, handler, priority=True, queryargs=params, parse_response_type="xml")
+        return self.post(path_list, data, handler, priority=True,
+                         queryargs=params, parse_response_type="xml",
+                         request_mimetype="application/xml; charset=utf-8")
 
     def get_collection(self, collection_id, handler, limit=100, offset=0):
         path_list = ["collection"]
@@ -189,7 +220,7 @@ class MBAPIHelper(APIHelper):
             queryargs["limit"] = limit
             queryargs["offset"] = offset
         return self.get(path_list, handler, priority=True, important=True,
-                            mblogin=True, queryargs=queryargs)
+                        mblogin=True, queryargs=queryargs)
 
     def get_collection_list(self, handler):
         return self.get_collection(None, handler)
@@ -218,7 +249,7 @@ class AcoustIdAPIHelper(APIHelper):
 
     def __init__(self, webservice):
         super().__init__(ACOUSTID_HOST, ACOUSTID_PORT,
-                                    '/v2/', webservice)
+                         '/v2/', webservice)
 
     def _encode_acoustid_args(self, args, format_='json'):
         filters = []
@@ -226,23 +257,25 @@ class AcoustIdAPIHelper(APIHelper):
         args['clientversion'] = PICARD_VERSION_STR
         args['format'] = format_
         for name, value in args.items():
-            value = string_(QUrl.toPercentEncoding(value))
-            filters.append('%s=%s' % (string_(name), value))
+            value = bytes(QUrl.toPercentEncoding(value)).decode()
+            filters.append('%s=%s' % (name, value))
         return '&'.join(filters)
 
     def query_acoustid(self, handler, **args):
         path_list = ['lookup']
         body = self._encode_acoustid_args(args)
-        return self.post(path_list, body, handler, priority=False, important=False, mblogin=False)
+        return self.post(path_list, body, handler, priority=False, important=False,
+                         mblogin=False, request_mimetype="application/x-www-form-urlencoded")
 
     def submit_acoustid_fingerprints(self, submissions, handler):
         path_list = ['submit']
         args = {'user': config.setting["acoustid_apikey"]}
         for i, submission in enumerate(submissions):
-            args['fingerprint.%d' % i] = string_(submission.fingerprint)
-            args['duration.%d' % i] = string_(submission.duration)
-            args['mbid.%d' % i] = string_(submission.recordingid)
+            args['fingerprint.%d' % i] = submission.fingerprint
+            args['duration.%d' % i] = str(submission.duration)
+            args['mbid.%d' % i] = submission.recordingid
             if submission.puid:
-                args['puid.%d' % i] = string_(submission.puid)
+                args['puid.%d' % i] = submission.puid
         body = self._encode_acoustid_args(args, format_='json')
-        return self.post(path_list, body, handler, priority=True, important=False, mblogin=False)
+        return self.post(path_list, body, handler, priority=True, important=False,
+                         mblogin=False, request_mimetype="application/x-www-form-urlencoded")

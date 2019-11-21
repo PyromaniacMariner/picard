@@ -22,7 +22,9 @@ import re
 
 PICARD_ORG_NAME = "MusicBrainz"
 PICARD_APP_NAME = "Picard"
-PICARD_VERSION = (2, 0, 0, 'dev', 2)
+PICARD_APP_ID = "org.musicbrainz.Picard"
+PICARD_DESKTOP_NAME = PICARD_APP_ID + ".desktop"
+PICARD_VERSION = (2, 3, 0, 'dev', 1)
 
 
 # optional build version
@@ -77,7 +79,7 @@ def version_from_string(version_str):
 PICARD_VERSION_STR = version_to_string(PICARD_VERSION)
 PICARD_VERSION_STR_SHORT = version_to_string(PICARD_VERSION, short=True)
 if PICARD_BUILD_VERSION_STR:
-    __version__ = "%s_%s" % (PICARD_VERSION_STR, PICARD_BUILD_VERSION_STR)
+    __version__ = "%s+%s" % (PICARD_VERSION_STR, PICARD_BUILD_VERSION_STR)
     PICARD_FANCY_VERSION_STR = "%s (%s)" % (PICARD_VERSION_STR_SHORT,
                                             PICARD_BUILD_VERSION_STR)
 else:
@@ -87,4 +89,8 @@ else:
 # Keep those ordered
 api_versions = [
     "2.0",
+    "2.1",
+    "2.2",
 ]
+
+api_versions_tuple = [version_from_string(v) for v in api_versions]

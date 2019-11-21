@@ -1,13 +1,19 @@
-import unittest
 from unittest.mock import MagicMock
+
+from test.picardtestcase import PicardTestCase
+
 from picard import config
 from picard.webservice import WebService
-from picard.webservice.api_helpers import APIHelper, MBAPIHelper
+from picard.webservice.api_helpers import (
+    APIHelper,
+    MBAPIHelper,
+)
 
 
-class APITest(unittest.TestCase):
+class APITest(PicardTestCase):
 
     def setUp(self):
+        super().setUp()
         self.host = "abc.com"
         self.port = 80
         self.api_path = "/v1/"
@@ -39,7 +45,7 @@ class APITest(unittest.TestCase):
         self._test_ws_function_args(self.ws.delete)
 
 
-class MBAPITest(unittest.TestCase):
+class MBAPITest(PicardTestCase):
 
     def setUp(self):
         self.config = {'server_host': "mb.org", "server_port": 443}

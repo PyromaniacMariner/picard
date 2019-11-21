@@ -1,12 +1,14 @@
 import json
 import os
-import unittest
+
+from test.picardtestcase import PicardTestCase
 
 from picard import config
 from picard.acoustid.json_helpers import parse_recording
 from picard.mbjson import recording_to_metadata
 from picard.metadata import Metadata
 from picard.track import Track
+
 
 settings = {
     "standardize_tracks": False,
@@ -17,19 +19,20 @@ settings = {
 }
 
 
-class AcoustIDTest(unittest.TestCase):
+class AcoustIDTest(PicardTestCase):
+    def setUp(self):
+        super().setUp()
+        self.init_test(self.filename)
 
     def init_test(self, filename):
-        config.setting = settings
+        config.setting = settings.copy()
         self.json_doc = None
         with open(os.path.join('test', 'data', 'ws_data', filename), encoding='utf-8') as f:
             self.json_doc = json.load(f)
 
 
 class RecordingTest(AcoustIDTest):
-
-    def setUp(self):
-        self.init_test('acoustid.json')
+    filename = 'acoustid.json'
 
     def test_recording(self):
         parsed_recording = parse_recording(self.json_doc)
@@ -38,7 +41,7 @@ class RecordingTest(AcoustIDTest):
         self.assertEqual(parsed_recording['id'], '017830c1-d1cf-46f3-8801-aaaa0a930223')
         self.assertEqual(parsed_recording['length'], 225000)
         self.assertEqual(parsed_recording['title'], 'Nina')
-        self.assertEqual(release['media'], [{'track': {}, 'format': 'CD', 'track-count': 12}])
+        self.assertEqual(release['media'], [{'format': 'CD', 'track-count': 12}])
         self.assertEqual(release['title'], 'x')
         self.assertEqual(release['id'], 'a2b25883-306f-4a53-809a-a234737c209d')
         self.assertEqual(release['release-group'], {'id': 'c24e5416-cd2e-4cff-851b-5faa78db98a2'})
@@ -50,9 +53,7 @@ class RecordingTest(AcoustIDTest):
 
 
 class NullRecordingTest(AcoustIDTest):
-
-    def setUp(self):
-        self.init_test('acoustid_null.json')
+    filename = 'acoustid_null.json'
 
     def test_recording(self):
         m = Metadata()

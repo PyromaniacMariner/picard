@@ -19,15 +19,57 @@
 
 
 import uuid
-from PyQt5 import QtCore, QtWidgets
+
+from PyQt5 import (
+    QtCore,
+    QtWidgets,
+)
+
+from picard import config
+from picard.const.sys import IS_MACOS
+from picard.util import restore_method
 
 
-class PicardDialog(QtWidgets.QDialog):
+class PreserveGeometry:
 
-    flags = QtCore.Qt.WindowSystemMenuHint | QtCore.Qt.WindowTitleHint
+    defaultsize = None
+    autorestore = True
+
+    def __init__(self):
+        config.Option("persist", self.opt_name(), QtCore.QByteArray())
+        if self.autorestore:
+            self.restore_geometry()
+        if getattr(self, 'finished', None):
+            self.finished.connect(self.save_geometry)
+
+    def opt_name(self):
+        return 'geometry_' + self.__class__.__name__
+
+    @restore_method
+    def restore_geometry(self):
+        geometry = config.persist[self.opt_name()]
+        if not geometry.isNull():
+            self.restoreGeometry(geometry)
+        elif self.defaultsize:
+            self.resize(self.defaultsize)
+
+    def save_geometry(self):
+        config.persist[self.opt_name()] = self.saveGeometry()
+
+
+class PicardDialog(QtWidgets.QDialog, PreserveGeometry):
+
+    flags = QtCore.Qt.WindowSystemMenuHint | QtCore.Qt.WindowTitleHint | QtCore.Qt.WindowCloseButtonHint
 
     def __init__(self, parent=None):
-        QtWidgets.QDialog.__init__(self, parent, self.flags)
+        super().__init__(parent, self.flags)
+
+    def keyPressEvent(self, event):
+        if (IS_MACOS and event.modifiers() & QtCore.Qt.ControlModifier
+            and event.key() == QtCore.Qt.Key_W):
+            self.close()
+        else:
+            super().keyPressEvent(event)
 
 
 # With py3, QObjects are no longer hashable unless they have
@@ -43,7 +85,7 @@ class HashableTreeWidgetItem(QtWidgets.QTreeWidgetItem):
         return self.id == other.id
 
     def __hash__(self):
-        return hash(string_(self.id))
+        return hash(str(self.id))
 
 
 class HashableListWidgetItem(QtWidgets.QListWidgetItem):
@@ -56,4 +98,4 @@ class HashableListWidgetItem(QtWidgets.QListWidgetItem):
         return self.id == other.id
 
     def __hash__(self):
-        return hash(string_(self.id))
+        return hash(str(self.id))

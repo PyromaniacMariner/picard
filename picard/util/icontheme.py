@@ -17,11 +17,14 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 
-import sys
 import os.path
+
 from PyQt5 import QtGui
 
-if sys.platform == 'win32':
+from picard.const.sys import IS_WIN
+
+
+if IS_WIN:
     _search_paths = []
 else:
     _search_paths = [

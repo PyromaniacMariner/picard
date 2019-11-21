@@ -18,7 +18,9 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 
 import re
+
 from PyQt5 import QtWidgets
+
 from picard import config
 from picard.plugin import ExtensionPoint
 
@@ -36,9 +38,11 @@ class OptionsPage(QtWidgets.QWidget):
     SORT_ORDER = 1000
     ACTIVE = True
     STYLESHEET_ERROR = "QWidget { background-color: #f55; color: white; font-weight:bold }"
+    STYLESHEET = "QLabel { qproperty-wordWrap: true; }"
 
-    def info(self):
-        raise NotImplementedError
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.setStyleSheet(self.STYLESHEET)
 
     def check(self):
         pass
@@ -80,7 +84,7 @@ class OptionsPage(QtWidgets.QWidget):
             try:
                 re.compile(regex_edit.text())
             except re.error as e:
-                raise OptionsCheckError(_("Regex Error"), string_(e))
+                raise OptionsCheckError(_("Regex Error"), str(e))
 
         def live_checker(text):
             regex_error.setStyleSheet("")
@@ -94,7 +98,7 @@ class OptionsPage(QtWidgets.QWidget):
         regex_edit.textChanged.connect(live_checker)
 
 
-_pages = ExtensionPoint()
+_pages = ExtensionPoint(label='pages')
 
 
 def register_options_page(page_class):

@@ -18,6 +18,7 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 
 import re
+
 from picard.util import strip_non_alnum
 from picard.util.astrcmp import astrcmp
 
@@ -51,11 +52,11 @@ def similarity2(a, b):
     score = 0.0
     if len(alist) > len(blist):
         alist, blist = blist, alist
-    for a in alist:
+    for av in alist:
         ms = 0.0
         mp = None
-        for position, b in enumerate(blist):
-            s = astrcmp(a, b)
+        for position, bv in enumerate(blist):
+            s = astrcmp(av, bv)
             if s > ms:
                 ms = s
                 mp = position

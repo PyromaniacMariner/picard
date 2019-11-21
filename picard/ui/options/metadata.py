@@ -18,9 +18,30 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 
 from picard import config
-from picard.ui.options import OptionsPage, register_options_page
-from picard.ui.ui_options_metadata import Ui_MetadataOptionsPage
 from picard.const import ALIAS_LOCALES
+
+from picard.ui.options import (
+    OptionsPage,
+    register_options_page,
+)
+from picard.ui.ui_options_metadata import Ui_MetadataOptionsPage
+
+
+def iter_sorted_locales(locales):
+    generic_names = []
+    grouped_locales = {}
+    for locale, name in locales.items():
+        name = _(name)
+        generic_locale = locale.split('_', 1)[0]
+        if generic_locale == locale:
+            generic_names.append((name, locale))
+        else:
+            grouped_locales.setdefault(generic_locale, []).append((name, locale))
+
+    for name, locale in sorted(generic_names):
+        yield (locale, name, 0)
+        for name, locale in sorted(grouped_locales.get(locale, [])):
+            yield (locale, name, 1)
 
 
 class MetadataOptionsPage(OptionsPage):
@@ -38,13 +59,13 @@ class MetadataOptionsPage(OptionsPage):
         config.BoolOption("setting", "translate_artist_names", False),
         config.BoolOption("setting", "release_ars", True),
         config.BoolOption("setting", "track_ars", False),
-        config.BoolOption("setting", "folksonomy_tags", False),
         config.BoolOption("setting", "convert_punctuation", True),
         config.BoolOption("setting", "standardize_artists", False),
+        config.BoolOption("setting", "standardize_instruments", True),
     ]
 
     def __init__(self, parent=None):
-        super(MetadataOptionsPage, self).__init__(parent)
+        super().__init__(parent)
         self.ui = Ui_MetadataOptionsPage()
         self.ui.setupUi(self)
         self.ui.va_name_default.clicked.connect(self.set_va_name_default)
@@ -54,22 +75,20 @@ class MetadataOptionsPage(OptionsPage):
         self.ui.translate_artist_names.setChecked(config.setting["translate_artist_names"])
 
         combo_box = self.ui.artist_locale
-        locales = sorted(ALIAS_LOCALES.keys())
-        for i, loc in enumerate(locales):
-            name = ALIAS_LOCALES[loc]
-            if "_" in loc:
-                name = "    " + name
-            combo_box.addItem(name, loc)
-            if loc == config.setting["artist_locale"]:
+        current_locale = config.setting["artist_locale"]
+        for i, (locale, name, level) in enumerate(iter_sorted_locales(ALIAS_LOCALES)):
+            label = "    " * level + name
+            combo_box.addItem(label, locale)
+            if locale == current_locale:
                 combo_box.setCurrentIndex(i)
 
         self.ui.convert_punctuation.setChecked(config.setting["convert_punctuation"])
         self.ui.release_ars.setChecked(config.setting["release_ars"])
         self.ui.track_ars.setChecked(config.setting["track_ars"])
-        self.ui.folksonomy_tags.setChecked(config.setting["folksonomy_tags"])
         self.ui.va_name.setText(config.setting["va_name"])
         self.ui.nat_name.setText(config.setting["nat_name"])
         self.ui.standardize_artists.setChecked(config.setting["standardize_artists"])
+        self.ui.standardize_instruments.setChecked(config.setting["standardize_instruments"])
 
     def save(self):
         config.setting["translate_artist_names"] = self.ui.translate_artist_names.isChecked()
@@ -77,7 +96,6 @@ class MetadataOptionsPage(OptionsPage):
         config.setting["convert_punctuation"] = self.ui.convert_punctuation.isChecked()
         config.setting["release_ars"] = self.ui.release_ars.isChecked()
         config.setting["track_ars"] = self.ui.track_ars.isChecked()
-        config.setting["folksonomy_tags"] = self.ui.folksonomy_tags.isChecked()
         config.setting["va_name"] = self.ui.va_name.text()
         nat_name = self.ui.nat_name.text()
         if nat_name != config.setting["nat_name"]:
@@ -85,6 +103,7 @@ class MetadataOptionsPage(OptionsPage):
             if self.tagger.nats is not None:
                 self.tagger.nats.update()
         config.setting["standardize_artists"] = self.ui.standardize_artists.isChecked()
+        config.setting["standardize_instruments"] = self.ui.standardize_instruments.isChecked()
 
     def set_va_name_default(self):
         self.ui.va_name.setText(self.options[0].default)

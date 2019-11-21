@@ -17,39 +17,56 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 
-from PyQt5 import QtCore, QtWidgets
-from picard import config
-from picard.util import webbrowser2
-from picard.ui import PicardDialog, HashableTreeWidgetItem
-from picard.ui.util import StandardButton
-from picard.ui.options import (
+from PyQt5 import (
+    QtCore,
+    QtWidgets,
+)
+
+from picard import (
+    config,
+    log,
+)
+from picard.const import PICARD_URLS
+from picard.util import (
+    restore_method,
+    webbrowser2,
+)
+
+from picard.ui import (
+    HashableTreeWidgetItem,
+    PicardDialog,
+)
+from picard.ui.options import (  # noqa: F401 # pylint: disable=unused-import
+    OptionsCheckError,
+    _pages as page_classes,
     about,
     advanced,
     cdlookup,
     cover,
+    fingerprinting,
     general,
+    genres,
     interface,
-    folksonomy,
-    ratings,
+    interface_colors,
     matching,
     metadata,
+    network,
+    plugins,
+    ratings,
     releases,
     renaming,
-    plugins,
-    network,
     scripting,
     tags,
-    fingerprinting,
-    OptionsCheckError,
-    _pages as page_classes
+    tags_compatibility,
 )
+from picard.ui.util import StandardButton
 
 
 class OptionsDialog(PicardDialog):
 
+    autorestore = False
+
     options = [
-        config.Option("persist", "options_position", QtCore.QPoint()),
-        config.Option("persist", "options_size", QtCore.QSize(560, 400)),
         config.Option("persist", "options_splitter", QtCore.QByteArray()),
     ]
 
@@ -73,7 +90,9 @@ class OptionsDialog(PicardDialog):
             self.default_item = items[0]
 
     def __init__(self, default_page=None, parent=None):
-        PicardDialog.__init__(self, parent)
+        super().__init__(parent)
+        self.setWindowModality(QtCore.Qt.ApplicationModal)
+        self.setAttribute(QtCore.Qt.WA_DeleteOnClose)
 
         from picard.ui.ui_options import Ui_Dialog
         self.ui = Ui_Dialog()
@@ -100,8 +119,11 @@ class OptionsDialog(PicardDialog):
 
         self.pages = []
         for Page in page_classes:
-            page = Page(self.ui.pages_stack)
-            self.pages.append(page)
+            try:
+                page = Page(self.ui.pages_stack)
+                self.pages.append(page)
+            except Exception:
+                log.exception('Failed initializing options page %r', page)
         self.item_to_page = {}
         self.page_to_item = {}
         self.default_item = None
@@ -111,16 +133,22 @@ class OptionsDialog(PicardDialog):
         self.ui.pages_tree.expandAll()
         max_page_name = self.ui.pages_tree.sizeHintForColumn(0) + 2*self.ui.pages_tree.frameWidth()
         self.ui.pages_tree.collapseAll()
-        self.ui.pages_tree.setMinimumWidth(max_page_name)
+        self.ui.splitter.setSizes([max_page_name,
+                                   self.geometry().width() - max_page_name])
 
         self.ui.pages_tree.setHeaderLabels([""])
         self.ui.pages_tree.header().hide()
         self.ui.pages_tree.itemSelectionChanged.connect(self.switch_page)
 
         self.restoreWindowState()
+        self.finished.connect(self.saveWindowState)
 
         for page in self.pages:
-            page.load()
+            try:
+                page.load()
+            except Exception:
+                log.exception('Failed loading options page %r', page)
+                self.disable_page(page.NAME)
         self.ui.pages_tree.setCurrentItem(self.default_item)
 
     def switch_page(self):
@@ -129,38 +157,47 @@ class OptionsDialog(PicardDialog):
             page = self.item_to_page[items[0]]
             self.ui.pages_stack.setCurrentWidget(page)
 
+    def disable_page(self, name):
+        item = self.page_to_item[name]
+        item.setDisabled(True)
+
     def help(self):
-        webbrowser2.goto('doc_options')
+        current_page = self.ui.pages_stack.currentWidget()
+        url = "{}#{}".format(PICARD_URLS['doc_options'], current_page.NAME)
+        webbrowser2.open(url)
 
     def accept(self):
         for page in self.pages:
             try:
                 page.check()
             except OptionsCheckError as e:
-                self.ui.pages_tree.setCurrentItem(self.page_to_item[page.NAME])
-                page.display_error(e)
+                self._show_page_error(page, e)
+                return
+            except Exception as e:
+                log.exception('Failed checking options page %r', page)
+                self._show_page_error(page, e)
                 return
         for page in self.pages:
-            page.save()
-        self.saveWindowState()
-        QtWidgets.QDialog.accept(self)
+            try:
+                page.save()
+            except Exception as e:
+                log.exception('Failed saving options page %r', page)
+                self._show_page_error(page, e)
+                return
+        super().accept()
 
-    def closeEvent(self, event):
-        self.saveWindowState()
-        event.accept()
+    def _show_page_error(self, page, error):
+        if not isinstance(error, OptionsCheckError):
+            error = OptionsCheckError(_('Unexpected error'), str(error))
+        self.ui.pages_tree.setCurrentItem(self.page_to_item[page.NAME])
+        page.display_error(error)
 
     def saveWindowState(self):
-        pos = self.pos()
-        if not pos.isNull():
-            config.persist["options_position"] = pos
-        config.persist["options_size"] = self.size()
         config.persist["options_splitter"] = self.ui.splitter.saveState()
 
+    @restore_method
     def restoreWindowState(self):
-        pos = config.persist["options_position"]
-        if pos.x() > 0 and pos.y() > 0:
-            self.move(pos)
-        self.resize(config.persist["options_size"])
+        self.restore_geometry()
         self.ui.splitter.restoreState(config.persist["options_splitter"])
 
     def restore_all_defaults(self):
@@ -179,7 +216,7 @@ class OptionsDialog(PicardDialog):
         self._show_dialog(msg, self.restore_all_defaults)
 
     def _show_dialog(self, msg, function):
-        message_box = QtWidgets.QMessageBox()
+        message_box = QtWidgets.QMessageBox(self)
         message_box.setIcon(QtWidgets.QMessageBox.Warning)
         message_box.setWindowModality(QtCore.Qt.WindowModal)
         message_box.setWindowTitle(_("Confirm Reset"))

@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
+from test.picardtestcase import PicardTestCase
 
-from __future__ import print_function
-import unittest
 from picard import util
+
+
 #from picard.util import textencoding
 
 # Set the value to true below to show the coverage of Latin characters
@@ -105,7 +106,7 @@ combinations_to = (
 ascii_chars = u" !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
 
 
-class CompatibilityTest(unittest.TestCase):
+class CompatibilityTest(PicardTestCase):
 
     def test_correct(self):
         self.maxDiff = None
@@ -118,7 +119,7 @@ class CompatibilityTest(unittest.TestCase):
         pass
 
 
-class PunctuationTest(unittest.TestCase):
+class PunctuationTest(PicardTestCase):
 
     def test_correct(self):
         self.maxDiff = None
@@ -127,11 +128,15 @@ class PunctuationTest(unittest.TestCase):
         self.assertEqual(util.textencoding.unicode_simplify_punctuation(combinations_from), combinations_from)
         self.assertEqual(util.textencoding.unicode_simplify_punctuation(ascii_chars), ascii_chars)
 
+    def test_pathsave(self):
+        self.assertEqual(util.textencoding.unicode_simplify_punctuation('\u2215', True), '_')
+        self.assertEqual(util.textencoding.unicode_simplify_punctuation('/\\\u2215', True), '/\\_')
+
     def test_incorrect(self):
         pass
 
 
-class CombinationsTest(unittest.TestCase):
+class CombinationsTest(PicardTestCase):
 
     def test_correct(self):
         self.maxDiff = None
@@ -140,11 +145,15 @@ class CombinationsTest(unittest.TestCase):
         self.assertEqual(util.textencoding.unicode_simplify_combinations(punctuation_from), punctuation_from)
         self.assertEqual(util.textencoding.unicode_simplify_combinations(ascii_chars), ascii_chars)
 
+    def test_pathsave(self):
+        self.assertEqual(util.textencoding.unicode_simplify_combinations('8½', True), '8 1_2')
+        self.assertEqual(util.textencoding.unicode_simplify_combinations('8/\\½', True), '8/\\ 1_2')
+
     def test_incorrect(self):
         pass
 
 
-class AsciiPunctTest(unittest.TestCase):
+class AsciiPunctTest(PicardTestCase):
 
     def test_correct(self):
         self.assertEqual(util.textencoding.asciipunct(u"‘Test’"), u"'Test'") # Quotations
@@ -156,7 +165,7 @@ class AsciiPunctTest(unittest.TestCase):
         pass
 
 
-class UnaccentTest(unittest.TestCase):
+class UnaccentTest(PicardTestCase):
 
     def test_correct(self):
         self.assertEqual(util.textencoding.unaccent(u"Lukáš"), u"Lukas")
@@ -171,7 +180,7 @@ class UnaccentTest(unittest.TestCase):
         self.assertNotEqual(util.textencoding.unaccent(u"ænima"), u"aenima")
 
 
-class ReplaceNonAsciiTest(unittest.TestCase):
+class ReplaceNonAsciiTest(PicardTestCase):
 
     def test_correct(self):
         self.assertEqual(util.textencoding.replace_non_ascii(u"Lukáš"), u"Lukas")
@@ -189,6 +198,9 @@ class ReplaceNonAsciiTest(unittest.TestCase):
         self.assertEqual(util.textencoding.replace_non_ascii(u"⑴⑵⑶"), u"(1)(2)(3)") # Parenthesised numbers
         self.assertEqual(util.textencoding.replace_non_ascii(u"⒈ ⒉ ⒊"), u"1. 2. 3.") # Digit full stop
         self.assertEqual(util.textencoding.replace_non_ascii(u"１２３"), u"123") # Fullwidth digits
+
+    def test_pathsave(self):
+        self.assertEqual(util.textencoding.replace_non_ascii('\u2044/8½\\', pathsave=True), '_/8 1_2\\')
 
     def test_incorrect(self):
         self.assertNotEqual(util.textencoding.replace_non_ascii(u"Lukáš"), u"Lukáš")
@@ -231,4 +243,3 @@ if show_latin2ascii_coverage:
     print("letter-like:   ",util.textencoding.replace_non_ascii(letter_like))
     print("enclosed:      ",util.textencoding.replace_non_ascii(enclosed))
     print()
-

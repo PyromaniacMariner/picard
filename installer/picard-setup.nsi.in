@@ -10,23 +10,25 @@
 !define PRODUCT_UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_NAME}"
 !define PRODUCT_UNINST_ROOT_KEY "HKLM"
 
-SetCompressor /FINAL /SOLID LZMA 
+SetCompressor /FINAL /SOLID LZMA
 Name "${PRODUCT_NAME} ${PRODUCT_VERSION}"
 OutFile "picard-setup-${PRODUCT_VERSION}.exe"
 ShowInstDetails show
 ShowUnInstDetails show
 BrandingText " "
+Unicode true
 ; We need this so Windows 7/Vista lets us install what we need to
 RequestExecutionLevel admin
 
 ; The default installation directory
-InstallDir "$PROGRAMFILES\${PRODUCT_NAME}"
+InstallDir "$PROGRAMFILES64\${PRODUCT_NAME}"
 
 ; The default installation directory
 InstallDirRegKey HKLM "Software\MusicBrainz\${PRODUCT_NAME}" "InstallDir"
 
 !include "MUI2.nsh"
 !include "InstallOptions.nsh"
+!include "x64.nsh"
 
 ; MUI Settings
 
@@ -37,7 +39,6 @@ InstallDirRegKey HKLM "Software\MusicBrainz\${PRODUCT_NAME}" "InstallDir"
 !define MUI_WELCOMEFINISHPAGE_BITMAP "${PROJECT_PATH}\installer\images\wiz.bmp"
 !define MUI_ICON "${PROJECT_PATH}\installer\images\tango-install.ico"
 !define MUI_UNICON "${NSISDIR}\Contrib\Graphics\Icons\classic-uninstall.ico"
-
 
 ; Abort Warning
 !define MUI_ABORTWARNING
@@ -53,12 +54,16 @@ InstallDirRegKey HKLM "Software\MusicBrainz\${PRODUCT_NAME}" "InstallDir"
 !insertmacro MUI_PAGE_DIRECTORY
 
 ; Components page
+!define MUI_COMPONENTSPAGE_SMALLDESC
 !insertmacro MUI_PAGE_COMPONENTS
 
 ; Instfiles page
 !insertmacro MUI_PAGE_INSTFILES
 
 ; Finish page
+!define MUI_FINISHPAGE_TITLE_3LINES
+!define MUI_FINISHPAGE_RUN "$WINDIR\explorer.exe"
+!define MUI_FINISHPAGE_RUN_PARAMETERS "$\"$INSTDIR\picard.exe$\""
 !insertmacro MUI_PAGE_FINISH
 
 ; Uninstaller pages
@@ -70,37 +75,66 @@ UninstPage custom un.RemoveSettingsPage
 
 ; Reserve files
 ReserveFile "removeSettings.ini"
-ReserveFile "${NSISDIR}\Plugins\InstallOptions.dll"
+ReserveFile "${NSISDIR}\Plugins\x86-unicode\InstallOptions.dll"
+
+; Language handling
+!macro LOAD_LANGUAGE LANGUAGE
+  !insertmacro MUI_LANGUAGE "${LANGUAGE}"
+  !include "languages\${LANGUAGE}.nsh"
+!macroend
 
 ; Language files
-!insertmacro MUI_LANGUAGE "English"
+!insertmacro LOAD_LANGUAGE "English"
+; !insertmacro LOAD_LANGUAGE "Arabic"
+; !insertmacro LOAD_LANGUAGE "Catalan"
+; !insertmacro LOAD_LANGUAGE "Czech"
+; !insertmacro LOAD_LANGUAGE "Danish"
+!insertmacro LOAD_LANGUAGE "Dutch"
+; !insertmacro LOAD_LANGUAGE "Estonian"
+; !insertmacro LOAD_LANGUAGE "Finnish"
+; !insertmacro LOAD_LANGUAGE "French"
+!insertmacro LOAD_LANGUAGE "German"
+; !insertmacro LOAD_LANGUAGE "Greek"
+; !insertmacro LOAD_LANGUAGE "Hebrew"
+!insertmacro LOAD_LANGUAGE "Italian"
+; !insertmacro LOAD_LANGUAGE "Japanese"
+; !insertmacro LOAD_LANGUAGE "Korean"
+; !insertmacro LOAD_LANGUAGE "Norwegian"
+; !insertmacro LOAD_LANGUAGE "Polish"
+; !insertmacro LOAD_LANGUAGE "Portuguese"
+; !insertmacro LOAD_LANGUAGE "PortugueseBR"
+; !insertmacro LOAD_LANGUAGE "Russian"
+; !insertmacro LOAD_LANGUAGE "SimpChinese"
+; !insertmacro LOAD_LANGUAGE "Slovak"
+; !insertmacro LOAD_LANGUAGE "Slovenian"
+; !insertmacro LOAD_LANGUAGE "Spanish"
+; !insertmacro LOAD_LANGUAGE "Swedish"
+; !insertmacro LOAD_LANGUAGE "TradChinese"
+; !insertmacro LOAD_LANGUAGE "Turkish"
+; !insertmacro LOAD_LANGUAGE "Ukrainian"
 
 ; Adds info to installer
-VIProductVersion "0.12.0.0"
+VIProductVersion "%(file_version)s"
 VIAddVersionKey /LANG=${LANG_ENGLISH} "ProductName" "${PRODUCT_NAME}"
 VIAddVersionKey /LANG=${LANG_ENGLISH} "Comments" "${PRODUCT_DESCRIPTION}"
 VIAddVersionKey /LANG=${LANG_ENGLISH} "CompanyName" "${PRODUCT_PUBLISHER}"
 VIAddVersionKey /LANG=${LANG_ENGLISH} "LegalCopyright" "© ${PRODUCT_PUBLISHER} under the GNU GPLv2."
 VIAddVersionKey /LANG=${LANG_ENGLISH} "FileDescription" "Installation for ${PRODUCT_NAME}"
 VIAddVersionKey /LANG=${LANG_ENGLISH} "FileVersion" "%(version)s"
+VIAddVersionKey /LANG=${LANG_ENGLISH} "ProductVersion" "%(version)s"
 
 ; Install
-Section !Required req
+Section "!$(SectionRequired)" required
   SectionIn RO
     SetOutPath "$INSTDIR"
     SetOverwrite on
-        
+
     ; Files
-    File "${PROJECT_PATH}\dist\"
-    
-    RMDir "$INSTDIR\imageformats"
-    CreateDirectory "$INSTDIR\imageformats"
-    SetOutPath "$INSTDIR\imageformats"
-    File /r "${PROJECT_PATH}\dist\imageformats\"
+    File /r /x "locale" "${PROJECT_PATH}\dist\picard\"
 
     ; Write the installation path into the registry
     WriteRegStr HKLM "Software\MusicBrainz\${PRODUCT_NAME}" "InstallDir" "$INSTDIR"
-  
+
     ; Create uninstaller
     WriteUninstaller "$INSTDIR\uninst.exe"
     WriteRegStr ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}" "DisplayName" "${PRODUCT_NAME}"
@@ -111,127 +145,114 @@ Section !Required req
     WriteRegStr ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}" "Comments" "${PRODUCT_DESCRIPTION}"
     WriteRegStr ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}" "URLInfoAbout" "${PRODUCT_URL}"
     WriteRegStr ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}" "UninstallString" "$INSTDIR\uninst.exe"
-
 SectionEnd
 
-Section "" imgs
-  SectionIn RO
-  RMDir "$INSTDIR\imageformats"
-  CreateDirectory "$INSTDIR\imageformats"
-  SetOutPath "$INSTDIR\imageformats"
-  File /r "${PROJECT_PATH}\dist\imageformats\"
-SectionEnd
-
-;Section "Phonon" phonon
-;  RMDir "$INSTDIR\phonon_backend"
-;  CreateDirectory "$INSTDIR\phonon_backend"
-;  SetOutPath "$INSTDIR\phonon_backend"
-;  File /r "${PROJECT_PATH}\dist\phonon_backend\"
-;SectionEnd
-
-Section "Languages" lang
+Section "$(SectionLanguages)" lang
   RMDir "$INSTDIR\locale"
   CreateDirectory "$INSTDIR\locale"
   SetOutPath "$INSTDIR\locale"
-  File /r "${PROJECT_PATH}\dist\locale\"
+  File /r "${PROJECT_PATH}\dist\picard\locale\"
 SectionEnd
 
-SubSection "Shortcuts" shortcuts
-  
-  Section "Startmenu" startmenu
+SectionGroup "$(SectionShortcuts)" shortcuts
+  Section "$(SectionStartmenu)" startmenu
     SetShellVarContext all
     SetOutPath "$INSTDIR"
     CreateShortCut "$SMPROGRAMS\${PRODUCT_NAME}.lnk" "$INSTDIR\picard.exe" \
       "" "" "" SW_SHOWNORMAL "" "${PRODUCT_DESCRIPTION}"
   SectionEnd
-  
-  Section "Desktop" desktop
+
+  Section "$(SectionDesktop)" desktop
     SetShellVarContext all
     SetOutPath "$INSTDIR"
     CreateShortCut "$DESKTOP\${PRODUCT_NAME}.lnk" "$INSTDIR\picard.exe" \
       "" "" "" SW_SHOWNORMAL "" "${PRODUCT_DESCRIPTION}"
   SectionEnd
-  
-  Section "Quick Launch" quicklaunch
-    SetShellVarContext all
-    SetOutPath "$INSTDIR"
-    CreateShortCut "$QUICKLAUNCH\${PRODUCT_NAME}.lnk" "$INSTDIR\picard.exe" \
-      "" "" "" SW_SHOWNORMAL "" "${PRODUCT_DESCRIPTION}"
-  SectionEnd
-
-SubSectionEnd
-
-Section "Plugins" plugins
-  CreateDirectory "$INSTDIR\plugins"
-  SetOutPath "$INSTDIR\plugins"
-  File /r "${PROJECT_PATH}\dist\plugins\"
-SectionEnd
+SectionGroupEnd
 
 ; Uninstall
 Function un.RemoveSettingsPage
-
   !insertmacro MUI_DEFAULT MUI_UNCONFIRMPAGE_TEXT_TOP ""
   !insertmacro MUI_DEFAULT MUI_UNCONFIRMPAGE_TEXT_LOCATION ""
   !insertmacro INSTALLOPTIONS_DISPLAY "removeSettings.ini"
-
 FunctionEnd
 
 Section Uninstall
-
-  ;!insertmacro MUI_STARTMENU_GETFOLDER "Application" $ICONS_GROUP
-  
   RMDir /r "$INSTDIR"
-  
+
   SetShellVarContext all
   Delete "$DESKTOP\${PRODUCT_NAME}.lnk"
-  
+
   SetShellVarContext all
   Delete "$SMPROGRAMS\${PRODUCT_NAME}.lnk"
-  
+
   SetShellVarContext all
   Delete "$QUICKLAUNCH\${PRODUCT_NAME}.lnk"
 
   DeleteRegKey ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}"
   DeleteRegKey HKLM "Software\MusicBrainz\${PRODUCT_NAME}"
-  
+
   !insertmacro INSTALLOPTIONS_READ $R0 "removeSettings.ini" "Field 1" "State"
   StrCmp $R0 "1" 0 +2
     ; Even more attempts
     DeleteRegKey HKCU "Software\MusicBrainz\Picard\persist"
     DeleteRegKey HKCU "Software\MusicBrainz\Picard\setting"
     DeleteRegKey HKCU "Software\MusicBrainz\Picard"
-    ;RMDir "$APPDATA\MusicBrainz\Picard\plugins"
-    
 SectionEnd
 
 ; Checks whether program is running.
-!define WNDCLASS "QWidget"
+!define WNDCLASS "Qt5QWindowIcon"
 !define WNDTITLE "${PRODUCT_NAME}"
 Function un.onInit
+  FindWindow $0 "${WNDCLASS}" "${WNDTITLE}"
+  StrCmp $0 0 continueInstall
+    MessageBox MB_ICONSTOP|MB_OK "$(MsgApplicationRunning)"
+    Abort
+  continueInstall:
   !insertmacro INSTALLOPTIONS_EXTRACT "removeSettings.ini"
-  FindWindow $0 "${WNDCLASS}" "${WNDTITLE}"
-  StrCmp $0 0 continueInstall
-    MessageBox MB_ICONSTOP|MB_OK "The application you are trying to remove is running. Close it and try again."
-    Abort
-  continueInstall:
+  !insertmacro INSTALLOPTIONS_WRITE "removeSettings.ini" "Field 1" "Text" "$(OptionRemoveSettings)"
 FunctionEnd
+
 Function .onInit
+  ; Abort installation if this is not a 64 bit system
+  ${IfNot} ${RunningX64}
+    MessageBox MB_ICONSTOP|MB_OK "$(MsgRequires64Bit)"
+    Abort
+  ${EndIf}
+
+  ; Abort installation if Picard is currently running
   FindWindow $0 "${WNDCLASS}" "${WNDTITLE}"
   StrCmp $0 0 continueInstall
-    MessageBox MB_ICONSTOP|MB_OK "The application you are trying to install is running. Close it and try again."
+    MessageBox MB_ICONSTOP|MB_OK "$(MsgApplicationRunning)"
     Abort
   continueInstall:
-  !insertmacro UnselectSection ${plugins}
-  !insertmacro UnselectSection ${desktop} 
-  !insertmacro UnselectSection ${quicklaunch} 
+
+  ; Uninstall previous installation
+  ReadRegStr $R0 HKLM "${PRODUCT_UNINST_KEY}" "UninstallString"
+  StrCmp $R0 "" skipUninstall
+
+  MessageBox MB_OKCANCEL|MB_ICONEXCLAMATION "$(MsgAlreadyInstalled)" IDOK uninstall
+  Abort
+
+  uninstall:
+  ClearErrors
+  Exec $R0
+
+  ; Check if previous install location was inside $PROGRAMFILES32
+  ReadRegStr $R0 HKLM "Software\MusicBrainz\${PRODUCT_NAME}" "InstallDir"
+  StrLen $R1 $PROGRAMFILES32
+  StrCpy $R2 $R0 $R1
+  StrCmp $R2 $PROGRAMFILES32 0 skipUninstall
+    StrCpy $INSTDIR "$PROGRAMFILES64\${PRODUCT_NAME}"
+
+  skipUninstall:
+  !insertmacro UnselectSection ${desktop}
 FunctionEnd
 
 !insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
-  !insertmacro MUI_DESCRIPTION_TEXT ${req} "Installs ${PRODUCT_NAME} along with the necessary files for it run."
- ; !insertmacro MUI_DESCRIPTION_TEXT ${phonon} "Installs support for limited music playback in ${PRODUCT_NAME}."
-  !insertmacro MUI_DESCRIPTION_TEXT ${lang} "Installs translations of ${PRODUCT_NAME} in different languages."
-  !insertmacro MUI_DESCRIPTION_TEXT ${plugins} "Installs all of the plugins that are bundled with this release."
-  !insertmacro MUI_DESCRIPTION_TEXT ${desktop} "Installs a shortcut on the desktop."
-  !insertmacro MUI_DESCRIPTION_TEXT ${startmenu} "Installs a shortcut in the Start Menu."
-  !insertmacro MUI_DESCRIPTION_TEXT ${quicklaunch} "Installs a shortcut in the quicklaunch bar."
+  !insertmacro MUI_DESCRIPTION_TEXT ${required} "$(MuiDescriptionRequired)"
+  !insertmacro MUI_DESCRIPTION_TEXT ${lang} "$(MuiDescriptionLang)"
+  !insertmacro MUI_DESCRIPTION_TEXT ${shortcuts} "$(MuiDescriptionShortcuts)"
+  !insertmacro MUI_DESCRIPTION_TEXT ${desktop} "$(MuiDescriptionDesktop)"
+  !insertmacro MUI_DESCRIPTION_TEXT ${startmenu} "$(MuiDescriptionStarteMenu)"
 !insertmacro MUI_FUNCTION_DESCRIPTION_END

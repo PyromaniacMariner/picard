@@ -37,7 +37,6 @@ def _make_releases_node(recording):
                 medium_mb = {}
                 if 'format' in medium:
                     medium_mb['format'] = medium['format']
-                medium_mb['track'] = {}
                 medium_mb['track-count'] = medium['track_count']
                 release_mb['media'].append(medium_mb)
             release_list.append(release_mb)
@@ -67,15 +66,21 @@ def _make_artist_credit_node(artists):
 
 
 def parse_recording(recording):
-    if 'title' not in recording:  # we have no metadata for this recording
+    if 'id' not in recording:  # we have no metadata for this recording
         return
 
     recording_mb = {
-        'id': recording['id'],
-        'title': recording['title'],
-        'artist-credit': _make_artist_credit_node(recording['artists']),
-        'releases': _make_releases_node(recording)
+        'id': recording['id']
     }
+
+    if 'title' in recording:
+        recording_mb['title'] = recording['title']
+
+    if 'artists' in recording:
+        recording_mb['artist-credit'] = _make_artist_credit_node(recording['artists'])
+
+    if 'releasegroups' in recording:
+        recording_mb['releases'] = _make_releases_node(recording)
 
     if 'duration' in recording:
         try:

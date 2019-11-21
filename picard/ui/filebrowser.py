@@ -19,22 +19,31 @@
 #
 
 import os
-import sys
-from PyQt5 import QtCore, QtWidgets
+
+from PyQt5 import (
+    QtCore,
+    QtWidgets,
+)
+from PyQt5.QtCore import QStandardPaths
+
 from picard import config
+from picard.const.sys import IS_MACOS
 from picard.formats import supported_formats
 from picard.util import find_existing_path
+
+
+_default_current_browser_path = QStandardPaths.writableLocation(QStandardPaths.HomeLocation)
 
 
 class FileBrowser(QtWidgets.QTreeView):
 
     options = [
-        config.TextOption("persist", "current_browser_path", ""),
+        config.TextOption("persist", "current_browser_path", _default_current_browser_path),
         config.BoolOption("persist", "show_hidden_files", False),
     ]
 
     def __init__(self, parent):
-        QtWidgets.QTreeView.__init__(self, parent)
+        super().__init__(parent)
         self.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
         self.setDragEnabled(True)
         self.move_files_here_action = QtWidgets.QAction(_("&Move Tagged Files Here"), self)
@@ -65,7 +74,7 @@ class FileBrowser(QtWidgets.QTreeView):
         self.model.setNameFilterDisables(False)
         self.model.sort(0, QtCore.Qt.AscendingOrder)
         self.setModel(self.model)
-        if sys.platform == "darwin":
+        if IS_MACOS:
             self.setRootIndex(self.model.index("/Volumes"))
         header = self.header()
         header.hideSection(1)
@@ -93,15 +102,28 @@ class FileBrowser(QtWidgets.QTreeView):
             self.scrollTo(self.currentIndex())
         QtCore.QTimer.singleShot(0, scroll)
 
+    def scrollTo(self, index, scrolltype=QtWidgets.QAbstractItemView.EnsureVisible):
+        # QTreeView.scrollTo resets the horizontal scroll position to 0.
+        # Reimplemented to instead scroll to horizontal parent position.
+        level = -1
+        super().scrollTo(index, scrolltype)
+        parent = self.currentIndex().parent()
+        root = self.rootIndex()
+        while parent.isValid() and parent != root:
+            parent = parent.parent()
+            level += 1
+        pos_x = max(self.indentation() * level, 0)
+        self.horizontalScrollBar().setValue(pos_x)
+
     def mousePressEvent(self, event):
         index = self.indexAt(event.pos())
         if index.isValid():
             self.selectionModel().setCurrentIndex(index, QtCore.QItemSelectionModel.NoUpdate)
-        QtWidgets.QTreeView.mousePressEvent(self, event)
+        super().mousePressEvent(event)
 
     def focusInEvent(self, event):
         self.focused = True
-        QtWidgets.QTreeView.focusInEvent(self, event)
+        super().focusInEvent(event)
 
     def show_hidden(self, state):
         config.persist["show_hidden_files"] = state

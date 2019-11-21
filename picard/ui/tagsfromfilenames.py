@@ -17,26 +17,27 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 
-import re
 import os.path
-from PyQt5 import QtCore, QtWidgets
+import re
+
+from PyQt5 import QtWidgets
+
 from picard import config
-from picard.ui.util import StandardButton
+from picard.util.tags import display_tag_name
+
 from picard.ui import PicardDialog
 from picard.ui.ui_tagsfromfilenames import Ui_TagsFromFileNamesDialog
-from picard.util.tags import display_tag_name
+from picard.ui.util import StandardButton
 
 
 class TagsFromFileNamesDialog(PicardDialog):
 
     options = [
         config.TextOption("persist", "tags_from_filenames_format", ""),
-        config.Option("persist", "tags_from_filenames_position", QtCore.QPoint()),
-        config.Option("persist", "tags_from_filenames_size", QtCore.QSize(560, 400)),
     ]
 
     def __init__(self, files, parent=None):
-        PicardDialog.__init__(self, parent)
+        super().__init__(parent)
         self.ui = Ui_TagsFromFileNamesDialog()
         self.ui.setupUi(self)
         items = [
@@ -63,7 +64,6 @@ class TagsFromFileNamesDialog(PicardDialog):
         self.ui.buttonbox.rejected.connect(self.reject)
         self.ui.preview.clicked.connect(self.preview)
         self.ui.files.setHeaderLabels([_("File Name")])
-        self.restoreWindowState()
         self.files = files
         self.items = []
         for file in files:
@@ -83,7 +83,7 @@ class TagsFromFileNamesDialog(PicardDialog):
                 columns.append(name)
                 if name in self.numeric_tags:
                     format_re.append('(?P<' + name + r'>\d+)')
-                elif name in ('date'):
+                elif name == 'date':
                     format_re.append('(?P<' + name + r'>\d+(?:-\d+(?:-\d+)?)?)')
                 else:
                     format_re.append('(?P<' + name + '>[^/]*?)')
@@ -94,7 +94,7 @@ class TagsFromFileNamesDialog(PicardDialog):
         return format_re, columns
 
     def match_file(self, file, tff_format):
-        match = tff_format.search(file.filename.replace('\\','/'))
+        match = tff_format.search(file.filename.replace('\\', '/'))
         if match:
             result = {}
             for name, value in match.groupdict().items():
@@ -126,25 +126,4 @@ class TagsFromFileNamesDialog(PicardDialog):
                 file.metadata[name] = value
             file.update()
         config.persist["tags_from_filenames_format"] = self.ui.format.currentText()
-        self.saveWindowState()
-        QtWidgets.QDialog.accept(self)
-
-    def reject(self):
-        self.saveWindowState()
-        QtWidgets.QDialog.reject(self)
-
-    def closeEvent(self, event):
-        self.saveWindowState()
-        event.accept()
-
-    def saveWindowState(self):
-        pos = self.pos()
-        if not pos.isNull():
-            config.persist["tags_from_filenames_position"] = pos
-        config.persist["tags_from_filenames_size"] = self.size()
-
-    def restoreWindowState(self):
-        pos = config.persist["tags_from_filenames_position"]
-        if pos.x() > 0 and pos.y() > 0:
-            self.move(pos)
-        self.resize(config.persist["tags_from_filenames_size"])
+        super().accept()

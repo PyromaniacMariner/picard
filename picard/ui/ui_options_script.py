@@ -43,11 +43,12 @@ class Ui_ScriptingOptionsPage(object):
         self.splitter.setChildrenCollapsible(False)
         self.splitter.setObjectName("splitter")
         self.script_list = QtWidgets.QListWidget(self.splitter)
-        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Expanding)
+        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.MinimumExpanding, QtWidgets.QSizePolicy.Expanding)
         sizePolicy.setHorizontalStretch(0)
         sizePolicy.setVerticalStretch(0)
         sizePolicy.setHeightForWidth(self.script_list.sizePolicy().hasHeightForWidth())
         self.script_list.setSizePolicy(sizePolicy)
+        self.script_list.setMinimumSize(QtCore.QSize(80, 0))
         self.script_list.setObjectName("script_list")
         self.formWidget = QtWidgets.QWidget(self.splitter)
         self.formWidget.setObjectName("formWidget")
@@ -63,6 +64,7 @@ class Ui_ScriptingOptionsPage(object):
         self.script_name.setObjectName("script_name")
         self.verticalLayout_2.addWidget(self.script_name)
         self.tagger_script = QtWidgets.QTextEdit(self.formWidget)
+        self.tagger_script.setAcceptRichText(False)
         self.tagger_script.setObjectName("tagger_script")
         self.verticalLayout_2.addWidget(self.tagger_script)
         self.verticalLayout_3.addWidget(self.splitter)
@@ -82,6 +84,10 @@ class Ui_ScriptingOptionsPage(object):
 
         self.retranslateUi(ScriptingOptionsPage)
         QtCore.QMetaObject.connectSlotsByName(ScriptingOptionsPage)
+        ScriptingOptionsPage.setTabOrder(self.enable_tagger_scripts, self.add_script)
+        ScriptingOptionsPage.setTabOrder(self.add_script, self.script_list)
+        ScriptingOptionsPage.setTabOrder(self.script_list, self.script_name)
+        ScriptingOptionsPage.setTabOrder(self.script_name, self.tagger_script)
 
     def retranslateUi(self, ScriptingOptionsPage):
         _translate = QtCore.QCoreApplication.translate

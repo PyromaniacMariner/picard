@@ -17,21 +17,82 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 
-from operator import itemgetter
 from locale import strxfrm
-from PyQt5 import QtCore, QtWidgets
+from operator import itemgetter
+
+from PyQt5 import (
+    QtCore,
+    QtWidgets,
+)
+
 from picard import config
-from picard.ui.options import OptionsPage, register_options_page
-from picard.ui.ui_options_releases import Ui_ReleasesOptionsPage
-from picard.const import (RELEASE_COUNTRIES,
-                          RELEASE_FORMATS,
-                          RELEASE_PRIMARY_GROUPS,
-                          RELEASE_SECONDARY_GROUPS)
+from picard.const import (
+    RELEASE_COUNTRIES,
+    RELEASE_FORMATS,
+    RELEASE_PRIMARY_GROUPS,
+    RELEASE_SECONDARY_GROUPS,
+)
+from picard.const.sys import IS_WIN
 from picard.i18n import gettext_attr
+
+from picard.ui.options import (
+    OptionsPage,
+    register_options_page,
+)
+from picard.ui.ui_options_releases import Ui_ReleasesOptionsPage
 
 
 _DEFAULT_SCORE = 0.5
 _release_type_scores = [(g, _DEFAULT_SCORE) for g in list(RELEASE_PRIMARY_GROUPS.keys()) + list(RELEASE_SECONDARY_GROUPS.keys())]
+
+
+class TipSlider(QtWidgets.QSlider):
+
+    _offset = QtCore.QPoint(0, -30)
+    _step = 5
+    _pagestep = 25
+    _minimum = 0
+    _maximum = 100
+
+    def __init__(self, *args):
+        super().__init__(*args)
+
+        self.style = QtWidgets.QApplication.style()
+        self.opt = QtWidgets.QStyleOptionSlider()
+        self.setMinimum(self._minimum)
+        self.setMaximum(self._maximum)
+        self.setOrientation(QtCore.Qt.Horizontal)
+        self.setSingleStep(self._step)
+        self.setTickInterval(self._step)
+        self.setPageStep(self._pagestep)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if not IS_WIN:
+            self.valueChanged.connect(self.show_tip)
+
+    def hideEvent(self, event):
+        super().hideEvent(event)
+        if not IS_WIN:
+            try:
+                self.valueChanged.disconnect(self.show_tip)
+            except TypeError:
+                pass
+
+    def show_tip(self, value):
+        self.round_value(value)
+        self.initStyleOption(self.opt)
+        rectHandle = self.style.subControlRect(self.style.CC_Slider, self.opt, self.style.SC_SliderHandle)
+
+        offset = self._offset * self.tagger.primaryScreen().devicePixelRatio()
+        pos_local = rectHandle.topLeft() + offset
+        pos_global = self.mapToGlobal(pos_local)
+        QtWidgets.QToolTip.showText(pos_global, str(self.value()), self)
+
+    def round_value(self, value):
+        step = max(1, int(self._step))
+        if step > 1:
+            super().setValue(int(value / step) * step)
 
 
 class ReleaseTypeScore:
@@ -43,9 +104,7 @@ class ReleaseTypeScore:
         self.label = QtWidgets.QLabel(self.group)
         self.label.setText(label)
         self.layout.addWidget(self.label, row, column, 1, 1)
-        self.slider = QtWidgets.QSlider(self.group)
-        self.slider.setMaximum(100)
-        self.slider.setOrientation(QtCore.Qt.Horizontal)
+        self.slider = TipSlider(self.group)
         self.layout.addWidget(self.slider, row, column + 1, 1, 1)
         self.reset()
 
@@ -96,7 +155,7 @@ class ReleasesOptionsPage(OptionsPage):
     ]
 
     def __init__(self, parent=None):
-        super(ReleasesOptionsPage, self).__init__(parent)
+        super().__init__(parent)
         self.ui = Ui_ReleasesOptionsPage()
         self.ui.setupUi(self)
 
@@ -110,11 +169,13 @@ class ReleasesOptionsPage(OptionsPage):
                                  label,
                                  next(griditer))
 
-        griditer = RowColIter(len(RELEASE_PRIMARY_GROUPS) +
-                              len(RELEASE_SECONDARY_GROUPS) + 1)  # +1 for Reset button
+        griditer = RowColIter(len(RELEASE_PRIMARY_GROUPS)
+                              + len(RELEASE_SECONDARY_GROUPS)
+                              + 1)  # +1 for Reset button
         for name in RELEASE_PRIMARY_GROUPS:
             add_slider(name, griditer, context='release_group_primary_type')
-        for name in RELEASE_SECONDARY_GROUPS:
+        for name in sorted(RELEASE_SECONDARY_GROUPS,
+                           key=lambda v: gettext_attr(v, 'release_group_secondary_type')):
             add_slider(name, griditer, context='release_group_secondary_type')
 
         self.reset_preferred_types_btn = QtWidgets.QPushButton(self.ui.type_group)
@@ -143,7 +204,7 @@ class ReleasesOptionsPage(OptionsPage):
         self.ui.preferred_format_list.clear()
         self.ui.country_list.clear()
         self.ui.format_list.clear()
-        super(ReleasesOptionsPage, self).restore_defaults()
+        super().restore_defaults()
 
     def load(self):
         scores = dict(config.setting["release_type_scores"])
@@ -198,7 +259,9 @@ class ReleasesOptionsPage(OptionsPage):
                            in source.items()]
         else:
             source_list = [(c[0], _(c[1])) for c in source.items()]
-        fcmp = lambda x: strxfrm(x[1])
+
+        def fcmp(x):
+            return strxfrm(x[1])
         source_list.sort(key=fcmp)
         saved_data = config.setting[setting]
         move = []
@@ -208,7 +271,7 @@ class ReleasesOptionsPage(OptionsPage):
             try:
                 i = saved_data.index(data)
                 move.append((i, item))
-            except:
+            except BaseException:
                 list1.addItem(item)
         move.sort(key=itemgetter(0))
         for i, item in move:
@@ -218,7 +281,7 @@ class ReleasesOptionsPage(OptionsPage):
         data = []
         for i in range(list1.count()):
             item = list1.item(i)
-            data.append(string_(item.data(QtCore.Qt.UserRole)))
+            data.append(item.data(QtCore.Qt.UserRole))
         config.setting[setting] = data
 
 

@@ -18,7 +18,11 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 
 from picard import config
-from picard.ui.options import OptionsPage, register_options_page
+
+from picard.ui.options import (
+    OptionsPage,
+    register_options_page,
+)
 from picard.ui.ui_options_advanced import Ui_AdvancedOptionsPage
 
 
@@ -34,6 +38,7 @@ class AdvancedOptionsPage(OptionsPage):
         config.TextOption("setting", "ignore_regex", ""),
         config.BoolOption("setting", "ignore_hidden_files", False),
         config.BoolOption("setting", "recursively_add_files", True),
+        config.IntOption("setting", "ignore_track_duration_difference_under", 2),
         config.BoolOption("setting", "completeness_ignore_videos", False),
         config.BoolOption("setting", "completeness_ignore_pregap", False),
         config.BoolOption("setting", "completeness_ignore_data", False),
@@ -41,7 +46,7 @@ class AdvancedOptionsPage(OptionsPage):
     ]
 
     def __init__(self, parent=None):
-        super(AdvancedOptionsPage, self).__init__(parent)
+        super().__init__(parent)
         self.ui = Ui_AdvancedOptionsPage()
         self.ui.setupUi(self)
         self.init_regex_checker(self.ui.ignore_regex, self.ui.regex_error)
@@ -50,6 +55,7 @@ class AdvancedOptionsPage(OptionsPage):
         self.ui.ignore_regex.setText(config.setting["ignore_regex"])
         self.ui.ignore_hidden_files.setChecked(config.setting["ignore_hidden_files"])
         self.ui.recursively_add_files.setChecked(config.setting["recursively_add_files"])
+        self.ui.ignore_track_duration_difference_under.setValue(config.setting["ignore_track_duration_difference_under"])
         self.ui.completeness_ignore_videos.setChecked(config.setting["completeness_ignore_videos"])
         self.ui.completeness_ignore_pregap.setChecked(config.setting["completeness_ignore_pregap"])
         self.ui.completeness_ignore_data.setChecked(config.setting["completeness_ignore_data"])
@@ -59,6 +65,7 @@ class AdvancedOptionsPage(OptionsPage):
         config.setting["ignore_regex"] = self.ui.ignore_regex.text()
         config.setting["ignore_hidden_files"] = self.ui.ignore_hidden_files.isChecked()
         config.setting["recursively_add_files"] = self.ui.recursively_add_files.isChecked()
+        config.setting["ignore_track_duration_difference_under"] = self.ui.ignore_track_duration_difference_under.value()
         config.setting["completeness_ignore_videos"] = self.ui.completeness_ignore_videos.isChecked()
         config.setting["completeness_ignore_pregap"] = self.ui.completeness_ignore_pregap.isChecked()
         config.setting["completeness_ignore_data"] = self.ui.completeness_ignore_data.isChecked()

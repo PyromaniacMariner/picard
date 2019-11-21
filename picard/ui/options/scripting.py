@@ -17,23 +17,34 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 
-from PyQt5 import QtCore, QtGui, QtWidgets
+from PyQt5 import (
+    QtCore,
+    QtGui,
+    QtWidgets,
+)
+
 from picard import config
-from picard.const import PICARD_URLS
+from picard.const import (
+    DEFAULT_NUMBERED_SCRIPT_NAME,
+    DEFAULT_SCRIPT_NAME,
+    PICARD_URLS,
+)
 from picard.script import ScriptParser
+from picard.util import restore_method
+
 from picard.ui import HashableListWidgetItem
-from picard.ui.options import OptionsPage, OptionsCheckError, register_options_page
+from picard.ui.options import (
+    OptionsCheckError,
+    OptionsPage,
+    register_options_page,
+)
 from picard.ui.ui_options_script import Ui_ScriptingOptionsPage
-
-
-DEFAULT_NUMBERED_SCRIPT_NAME = N_("My script %d")
-DEFAULT_SCRIPT_NAME = N_("My script")
 
 
 class TaggerScriptSyntaxHighlighter(QtGui.QSyntaxHighlighter):
 
     def __init__(self, document):
-        QtGui.QSyntaxHighlighter.__init__(self, document)
+        super().__init__(document)
         self.func_re = QtCore.QRegExp(r"\$(?!noop)[a-zA-Z][_a-zA-Z0-9]*\(")
         self.func_fmt = QtGui.QTextCharFormat()
         self.func_fmt.setFontWeight(QtGui.QFont.Bold)
@@ -85,7 +96,7 @@ class TaggerScriptSyntaxHighlighter(QtGui.QSyntaxHighlighter):
             elif (next_index > -1) and text[next_index] == ')':
                 open_brackets -= 1
 
-            if (next_index > -1):
+            if next_index > -1:
                 self.setFormat(index, next_index - index + 1, self.noop_fmt)
             elif (next_index == -1) and (open_brackets > 0):
                 self.setFormat(index, len(text) - index, self.noop_fmt)
@@ -109,7 +120,7 @@ class AdvancedScriptItem(QtWidgets.QWidget):
     _BUTTON_OTHER = 4
 
     def __init__(self, name=None, state=True, parent=None):
-        super(AdvancedScriptItem, self).__init__(parent)
+        super().__init__(parent)
         layout = QtWidgets.QGridLayout()
         layout.setHorizontalSpacing(5)
         layout.setVerticalSpacing(2)
@@ -186,6 +197,7 @@ class AdvancedScriptItem(QtWidgets.QWidget):
 
 class ScriptItem:
     """Holds a script's list and text widget properties and improves readability"""
+
     def __init__(self, pos, name=None, enabled=True, text=""):
         self.pos = pos
         if name is None:
@@ -216,7 +228,7 @@ class ScriptingOptionsPage(OptionsPage):
     ]
 
     def __init__(self, parent=None):
-        super(ScriptingOptionsPage, self).__init__(parent)
+        super().__init__(parent)
         self.ui = Ui_ScriptingOptionsPage()
         self.ui.setupUi(self)
         self.highlighter = TaggerScriptSyntaxHighlighter(self.ui.tagger_script.document())
@@ -231,6 +243,17 @@ class ScriptingOptionsPage(OptionsPage):
         self.last_selected_script_pos = 0
         self.ui.splitter.setStretchFactor(0, 1)
         self.ui.splitter.setStretchFactor(1, 2)
+        self.delete_shortcut = QtWidgets.QShortcut(self.ui.script_list)
+        self.delete_shortcut.setKey(QtGui.QKeySequence.Delete)
+        self.delete_shortcut.activated.connect(self.delete_selected_script)
+        font = QtGui.QFont('Monospace')
+        font.setStyleHint(QtGui.QFont.TypeWriter)
+        self.ui.tagger_script.setFont(font)
+
+    def delete_selected_script(self):
+        items = self.ui.script_list.selectedItems()
+        if items:
+            self.remove_from_list_of_scripts(self.ui.script_list.row(items[0]))
 
     def script_name_changed(self):
         items = self.ui.script_list.selectedItems()
@@ -319,7 +342,8 @@ class ScriptingOptionsPage(OptionsPage):
                         current_item.setSelected(True)
                     else:
                         item = self.ui.script_list.item(0)
-                        item.setSelected(True)
+                        if item:
+                            item.setSelected(True)
             elif row < self.last_selected_script_pos:
                 self.last_selected_script_pos -= 1
 
@@ -375,14 +399,14 @@ class ScriptingOptionsPage(OptionsPage):
         try:
             parser.eval(self.ui.tagger_script.toPlainText())
         except Exception as e:
-            raise OptionsCheckError(_("Script Error"), string_(e))
+            raise OptionsCheckError(_("Script Error"), str(e))
 
     def restore_defaults(self):
         # Remove existing scripts
         self.ui.script_list.clear()
         self.ui.script_name.setText("")
         self.ui.tagger_script.setText("")
-        super(ScriptingOptionsPage, self).restore_defaults()
+        super().restore_defaults()
 
     def load(self):
         self.ui.enable_tagger_scripts.setChecked(config.setting["enable_tagger_scripts"])
@@ -402,8 +426,7 @@ class ScriptingOptionsPage(OptionsPage):
         if last_selected_script:
             last_selected_script.setSelected(True)
 
-        # Preserve previous splitter position
-        self.ui.splitter.restoreState(config.persist["scripting_splitter"])
+        self.restore_state()
 
         args = {
             "picard-doc-scripting-url": PICARD_URLS['doc_scripting'],
@@ -411,6 +434,11 @@ class ScriptingOptionsPage(OptionsPage):
         text = _('<a href="%(picard-doc-scripting-url)s">Open Scripting'
                  ' Documentation in your browser</a>') % args
         self.ui.scripting_doc_link.setText(text)
+
+    @restore_method
+    def restore_state(self):
+        # Preserve previous splitter position
+        self.ui.splitter.restoreState(config.persist["scripting_splitter"])
 
     def save(self):
         config.setting["enable_tagger_scripts"] = self.ui.enable_tagger_scripts.isChecked()

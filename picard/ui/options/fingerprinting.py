@@ -18,11 +18,24 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 
 import os
-from PyQt5 import QtCore, QtWidgets
+
+from PyQt5 import (
+    QtCore,
+    QtWidgets,
+)
+
 from picard import config
-from picard.util import webbrowser2, find_executable
 from picard.const import FPCALC_NAMES
-from picard.ui.options import OptionsPage, OptionsCheckError, register_options_page
+from picard.util import (
+    find_executable,
+    webbrowser2,
+)
+
+from picard.ui.options import (
+    OptionsCheckError,
+    OptionsPage,
+    register_options_page,
+)
 from picard.ui.ui_options_fingerprinting import Ui_FingerprintingOptionsPage
 
 
@@ -42,7 +55,7 @@ class FingerprintingOptionsPage(OptionsPage):
     ]
 
     def __init__(self, parent=None):
-        super(FingerprintingOptionsPage, self).__init__(parent)
+        super().__init__(parent)
         self._fpcalc_valid = True
         self.ui = Ui_FingerprintingOptionsPage()
         self.ui.setupUi(self)
@@ -113,7 +126,7 @@ class FingerprintingOptionsPage(OptionsPage):
     def _on_acoustid_fpcalc_check_finished(self, exit_code, exit_status):
         process = self.sender()
         if exit_code == 0 and exit_status == 0:
-            output = string_(process.readAllStandardOutput())
+            output = bytes(process.readAllStandardOutput()).decode()
             if output.startswith("fpcalc version"):
                 self._acoustid_fpcalc_set_success(output.strip())
             else:
@@ -140,5 +153,6 @@ class FingerprintingOptionsPage(OptionsPage):
 
     def display_error(self, error):
         pass
+
 
 register_options_page(FingerprintingOptionsPage)

@@ -2,14 +2,16 @@ import os.path
 import shutil
 import sys
 import tempfile
-import unittest
+
+from test.picardtestcase import PicardTestCase
 
 from picard.i18n import setup_gettext
 from picard.util import bytes2human
 
 
-class Testbytes2human(unittest.TestCase):
+class Testbytes2human(PicardTestCase):
     def setUp(self):
+        super().setUp()
         # we are using temporary locales for tests
         self.tmp_path = tempfile.mkdtemp()
         if sys.hexversion >= 0x020700F0:
@@ -39,9 +41,18 @@ class Testbytes2human(unittest.TestCase):
         self.assertRaises(ValueError, bytes2human.binary, 'yyy')
         self.assertRaises(ValueError, bytes2human.binary, '456yyy')
         try:
-            bytes2human.decimal(u'123')
+            bytes2human.decimal('123')
         except Exception as e:
             self.fail('Unexpected exception: %s' % e)
+
+    def test_calc_unit_raises_value_error(self):
+        self.assertRaises(ValueError, bytes2human.calc_unit, 1, None)
+        self.assertRaises(ValueError, bytes2human.calc_unit, 1, 100)
+        self.assertRaises(ValueError, bytes2human.calc_unit, 1, 999)
+        self.assertRaises(ValueError, bytes2human.calc_unit, 1, 1023)
+        self.assertRaises(ValueError, bytes2human.calc_unit, 1, 1025)
+        self.assertEqual((1.0, 'B'), bytes2human.calc_unit(1, 1024))
+        self.assertEqual((1.0, 'B'), bytes2human.calc_unit(1, 1000))
 
     def run_test(self, lang='C', create_test_data=False):
         """
@@ -68,12 +79,12 @@ class Testbytes2human(unittest.TestCase):
                 p *= n
                 for x in [0.1, 0.5, 0.99, 0.9999, 1, 1.5]:
                     values.append(int(p * x))
-        l = []
+        list = []
         for x in sorted(values):
-            l.append(";".join([str(x), bytes2human.decimal(x),
-                               bytes2human.binary(x),
-                               bytes2human.short_string(x, 1024, 2)]))
-        return l
+            list.append(";".join([str(x), bytes2human.decimal(x),
+                                  bytes2human.binary(x),
+                                  bytes2human.short_string(x, 1024, 2)]))
+        return list
 
     def _save_expected_to(self, path, a_list):
         with open(path, 'wb') as f:
@@ -81,7 +92,12 @@ class Testbytes2human(unittest.TestCase):
             f.close()
 
     def _read_expected_from(self, path):
-        with open(path, 'rU') as f:
+        with open(path, 'r') as f:
             lines = [l.rstrip("\n") for l in f.readlines()]
             f.close()
             return lines
+
+    def test_calc_unit(self):
+        self.assertEqual(bytes2human.calc_unit(12456, 1024), (12.1640625, 'KiB'))
+        self.assertEqual(bytes2human.calc_unit(-12456, 1000), (-12.456, 'kB'))
+        self.assertRaises(ValueError, bytes2human.calc_unit, 0, 1001)

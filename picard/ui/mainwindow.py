@@ -17,83 +17,134 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 
-from PyQt5 import QtCore, QtGui, QtWidgets
-
+from collections import OrderedDict
+import datetime
+from functools import partial
 import os.path
 
-from picard import config, log
+from PyQt5 import (
+    QtCore,
+    QtGui,
+    QtWidgets,
+)
+
+from picard import (
+    PICARD_APP_ID,
+    config,
+    log,
+)
 from picard.album import Album
 from picard.cluster import Cluster
+from picard.const import PROGRAM_UPDATE_LEVELS
+from picard.const.sys import IS_MACOS
 from picard.file import File
-from picard.track import Track
 from picard.formats import supported_formats
-from picard.ui.coverartbox import CoverArtBox
-from picard.ui.itemviews import MainPanel
-from picard.ui.metadatabox import MetadataBox
-from picard.ui.filebrowser import FileBrowser
-from picard.ui.tagsfromfilenames import TagsFromFileNamesDialog
-from picard.ui.options.dialog import OptionsDialog
-from picard.ui.infodialog import FileInfoDialog, AlbumInfoDialog, TrackInfoDialog, ClusterInfoDialog
-from picard.ui.infostatus import InfoStatus
-from picard.ui.passworddialog import PasswordDialog, ProxyDialog
-from picard.ui.logview import LogView, HistoryView
-from picard.ui.searchdialog import (
-    TrackSearchDialog,
-    AlbumSearchDialog)
-from picard.ui.util import (
-    find_starting_directory,
-    ButtonLineEdit,
-    MultiDirsSelectDialog
-)
-from picard.util import icontheme, webbrowser2, throttle, thread
-from picard.util.cdrom import discid, get_cdrom_drives
 from picard.plugin import ExtensionPoint
+from picard.track import Track
+from picard.util import (
+    icontheme,
+    restore_method,
+    thread,
+    throttle,
+    webbrowser2,
+)
+from picard.util.cdrom import (
+    discid,
+    get_cdrom_drives,
+)
+
+from picard.ui import PreserveGeometry
+from picard.ui.coverartbox import CoverArtBox
+from picard.ui.filebrowser import FileBrowser
+from picard.ui.infodialog import (
+    AlbumInfoDialog,
+    ClusterInfoDialog,
+    FileInfoDialog,
+    TrackInfoDialog,
+)
+from picard.ui.infostatus import InfoStatus
+from picard.ui.itemviews import MainPanel
+from picard.ui.logview import (
+    HistoryView,
+    LogView,
+)
+from picard.ui.metadatabox import MetadataBox
+from picard.ui.options.dialog import OptionsDialog
+from picard.ui.passworddialog import (
+    PasswordDialog,
+    ProxyDialog,
+)
+from picard.ui.playertoolbar import Player
+from picard.ui.searchdialog.album import AlbumSearchDialog
+from picard.ui.searchdialog.track import TrackSearchDialog
+from picard.ui.statusindicator import DesktopStatusIndicator
+from picard.ui.tagsfromfilenames import TagsFromFileNamesDialog
+from picard.ui.util import (
+    MultiDirsSelectDialog,
+    find_starting_directory,
+)
 
 
-ui_init = ExtensionPoint()
+ui_init = ExtensionPoint(label='ui_init')
 
 
 def register_ui_init(function):
     ui_init.register(function.__module__, function)
 
 
-class MainWindow(QtWidgets.QMainWindow):
+class MainWindow(QtWidgets.QMainWindow, PreserveGeometry):
 
+    defaultsize = QtCore.QSize(780, 560)
+    autorestore = False
     selection_updated = QtCore.pyqtSignal(object)
 
     options = [
         config.Option("persist", "window_state", QtCore.QByteArray()),
-        config.Option("persist", "window_position", QtCore.QPoint()),
-        config.Option("persist", "window_size", QtCore.QSize(780, 560)),
         config.Option("persist", "bottom_splitter_state", QtCore.QByteArray()),
         config.BoolOption("persist", "window_maximized", False),
         config.BoolOption("persist", "view_cover_art", True),
         config.BoolOption("persist", "view_toolbar", True),
         config.BoolOption("persist", "view_file_browser", False),
         config.TextOption("persist", "current_directory", ""),
+        config.FloatOption("persist", "mediaplayer_playback_rate", 1.0),
+        config.IntOption("persist", "mediaplayer_volume", 50),
     ]
 
     def __init__(self, parent=None):
-        QtWidgets.QMainWindow.__init__(self, parent)
+        super().__init__(parent)
         self.selected_objects = []
         self.ignore_selection_changes = False
+        self.toolbar = None
+        self.player = None
+        self.status_indicators = []
+        player = Player(self)
+        if player.available:
+            self.player = player
+            self.player.error.connect(self._on_player_error)
         self.setupUi()
 
     def setupUi(self):
         self.setWindowTitle(_("MusicBrainz Picard"))
         icon = QtGui.QIcon()
-        icon.addFile(":/images/16x16/picard.png", QtCore.QSize(16, 16))
-        icon.addFile(":/images/24x24/picard.png", QtCore.QSize(24, 24))
-        icon.addFile(":/images/32x32/picard.png", QtCore.QSize(32, 32))
-        icon.addFile(":/images/48x48/picard.png", QtCore.QSize(48, 48))
-        icon.addFile(":/images/128x128/picard.png", QtCore.QSize(128, 128))
-        icon.addFile(":/images/256x256/picard.png", QtCore.QSize(256, 256))
+        for size in (16, 24, 32, 48, 128, 256):
+            icon.addFile(
+                ":/images/{size}x{size}/{app_id}.png".format(
+                    size=size, app_id=PICARD_APP_ID),
+                QtCore.QSize(size, size)
+            )
         self.setWindowIcon(icon)
+
+        self.show_close_window = IS_MACOS
 
         self.create_actions()
         self.create_statusbar()
         self.create_toolbar()
         self.create_menus()
+
+        if IS_MACOS:
+            self.setUnifiedTitleAndToolBarOnMac(True)
+            self.toolbar.setMovable(False)
+            self.search_toolbar.setMovable(False)
 
         mainLayout = QtWidgets.QSplitter(QtCore.Qt.Vertical)
         mainLayout.setContentsMargins(0, 0, 0, 0)
@@ -113,6 +164,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.logDialog = LogView(self)
         self.historyDialog = HistoryView(self)
+        self.optionsDialog = None
 
         bottomLayout = QtWidgets.QHBoxLayout()
         bottomLayout.setContentsMargins(0, 0, 0, 0)
@@ -133,25 +185,43 @@ class MainWindow(QtWidgets.QMainWindow):
             function(self)
 
     def keyPressEvent(self, event):
-        if event.matches(QtGui.QKeySequence.Delete):
+        # On macOS Command+Backspace triggers the so called "Forward Delete".
+        # It should be treated the same as the Delete button.
+        is_forward_delete = IS_MACOS and \
+            event.key() == QtCore.Qt.Key_Backspace and \
+            event.modifiers() & QtCore.Qt.ControlModifier
+        if event.matches(QtGui.QKeySequence.Delete) or is_forward_delete:
             if self.metadata_box.hasFocus():
                 self.metadata_box.remove_selected_tags()
             else:
                 self.remove()
         else:
-            QtWidgets.QMainWindow.keyPressEvent(self, event)
+            super().keyPressEvent(event)
 
     def show(self):
         self.restoreWindowState()
-        QtWidgets.QMainWindow.show(self)
+        super().show()
+        if self.tagger.autoupdate_enabled:
+            self.auto_update_check()
         self.metadata_box.restore_state()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if DesktopStatusIndicator:
+            self.register_status_indicator(DesktopStatusIndicator(self.windowHandle()))
 
     def closeEvent(self, event):
         if config.setting["quit_confirmation"] and not self.show_quit_confirmation():
             event.ignore()
             return
+        if self.player:
+            config.persist['mediaplayer_playback_rate'] = self.player.playback_rate()
+            config.persist['mediaplayer_volume'] = self.player.volume()
         self.saveWindowState()
         event.accept()
+
+    def register_status_indicator(self, indicator):
+        self.status_indicators.append(indicator)
 
     def show_quit_confirmation(self):
         unsaved_files = sum(a.get_num_unsaved_files() for a in self.tagger.albums.values())
@@ -181,16 +251,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def saveWindowState(self):
         config.persist["window_state"] = self.saveState()
         isMaximized = int(self.windowState()) & QtCore.Qt.WindowMaximized != 0
-        if isMaximized:
-            # FIXME: this doesn't include the window frame
-            geom = self.normalGeometry()
-            config.persist["window_position"] = geom.topLeft()
-            config.persist["window_size"] = geom.size()
-        else:
-            pos = self.pos()
-            if not pos.isNull():
-                config.persist["window_position"] = pos
-            config.persist["window_size"] = self.size()
+        self.save_geometry()
         config.persist["window_maximized"] = isMaximized
         config.persist["view_cover_art"] = self.show_cover_art_action.isChecked()
         config.persist["view_toolbar"] = self.show_toolbar_action.isChecked()
@@ -200,18 +261,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.panel.save_state()
         self.metadata_box.save_state()
 
+    @restore_method
     def restoreWindowState(self):
         self.restoreState(config.persist["window_state"])
-        pos = config.persist["window_position"]
-        size = config.persist["window_size"]
-        self._desktopgeo = self.tagger.desktop().screenGeometry()
-        if (pos.x() > 0 and pos.y() > 0
-            and pos.x() + size.width() < self._desktopgeo.width()
-            and pos.y() + size.height() < self._desktopgeo.height()):
-            self.move(pos)
-        if size.width() <= 0 or size.height() <= 0:
-            size = QtCore.QSize(780, 560)
-        self.resize(size)
+        self.restore_geometry()
         if config.persist["window_maximized"]:
             self.setWindowState(QtCore.Qt.WindowMaximized)
         bottom_splitter_state = config.persist["bottom_splitter_state"]
@@ -224,7 +277,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def create_statusbar(self):
         """Creates a new status bar."""
         self.statusBar().showMessage(_("Ready"))
-        self.infostatus = InfoStatus(self)
+        infostatus = InfoStatus(self)
         self.listening_label = QtWidgets.QLabel()
         self.listening_label.setVisible(False)
         self.listening_label.setToolTip("<qt/>" + _(
@@ -232,20 +285,24 @@ class MainWindow(QtWidgets.QMainWindow):
             "you \"Search\" or \"Open in Browser\" from Picard, clicking the "
             "\"Tagger\" button on the web page loads the release into Picard."
         ))
-        self.statusBar().addPermanentWidget(self.infostatus)
+        self.statusBar().addPermanentWidget(infostatus)
         self.statusBar().addPermanentWidget(self.listening_label)
         self.tagger.tagger_stats_changed.connect(self.update_statusbar_stats)
         self.tagger.listen_port_changed.connect(self.update_statusbar_listen_port)
+        self.register_status_indicator(infostatus)
         self.update_statusbar_stats()
 
     @throttle(100)
     def update_statusbar_stats(self):
         """Updates the status bar information."""
-        self.infostatus.setFiles(len(self.tagger.files))
-        self.infostatus.setAlbums(len(self.tagger.albums))
-        self.infostatus.setPendingFiles(File.num_pending_files)
-        ws = self.tagger.webservice
-        self.infostatus.setPendingRequests(ws.num_pending_web_requests)
+        total_files = len(self.tagger.files)
+        total_albums = len(self.tagger.albums)
+        pending_files = File.num_pending_files
+        pending_requests = self.tagger.webservice.num_pending_web_requests
+
+        for indicator in self.status_indicators:
+            indicator.update(files=total_files, albums=total_albums,
+                pending_files=pending_files, pending_requests=pending_requests)
 
     def update_statusbar_listen_port(self, listen_port):
         if listen_port:
@@ -355,6 +412,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.add_directory_action.setShortcut(QtGui.QKeySequence(_("Ctrl+D")))
         self.add_directory_action.triggered.connect(self.add_directory)
 
+        if self.show_close_window:
+            self.close_window_action = QtWidgets.QAction(_("Close Window"), self)
+            self.close_window_action.setShortcut(QtGui.QKeySequence(_("Ctrl+W")))
+            self.close_window_action.triggered.connect(self.close_active_window)
+
         self.save_action = QtWidgets.QAction(icontheme.lookup('document-save'), _("&Save"), self)
         self.save_action.setStatusTip(_("Save selected files"))
         # TR: Keyboard shortcut for "Save"
@@ -428,18 +490,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if discid is None:
             log.warning("CDROM: discid library not found - Lookup CD functionality disabled")
         else:
-            drives = get_cdrom_drives()
-            if not drives:
-                log.warning("CDROM: No CD-ROM drives found - Lookup CD functionality disabled")
-            else:
-                shortcut_drive = config.setting["cd_lookup_device"].split(",")[0] if len(drives) > 1 else ""
-                self.cd_lookup_action.setEnabled(True)
-                for drive in drives:
-                    action = self.cd_lookup_menu.addAction(drive)
-                    if drive == shortcut_drive:
-                        # Clear existing shortcode on main action and assign it to sub-action
-                        self.cd_lookup_action.setShortcut(QtGui.QKeySequence())
-                        action.setShortcut(QtGui.QKeySequence(_("Ctrl+K")))
+            thread.run_task(get_cdrom_drives, self._update_cd_lookup_actions)
 
         self.analyze_action = QtWidgets.QAction(icontheme.lookup('picard-analyze'), _("&Scan"), self)
         self.analyze_action.setStatusTip(_("Use AcoustID audio fingerprint to identify the files by the actual music, even if they have no metadata"))
@@ -498,11 +549,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self.open_collection_in_browser_action.triggered.connect(self.open_collection_in_browser)
         self.open_collection_in_browser_action.setEnabled(config.setting["username"] != '')
 
-        self.view_log_action = QtWidgets.QAction(_("View Error/Debug &Log"), self)
+        self.view_log_action = QtWidgets.QAction(_("View &Error/Debug Log"), self)
         self.view_log_action.triggered.connect(self.show_log)
+        # TR: Keyboard shortcut for "View Error/Debug Log"
+        self.view_log_action.setShortcut(QtGui.QKeySequence(_("Ctrl+E")))
 
         self.view_history_action = QtWidgets.QAction(_("View Activity &History"), self)
         self.view_history_action.triggered.connect(self.show_history)
+        # TR: Keyboard shortcut for "View Activity History"
+        self.view_history_action.setShortcut(QtGui.QKeySequence(_("Ctrl+H")))
 
         webservice_manager = self.tagger.webservice.manager
         webservice_manager.authenticationRequired.connect(self.show_password_dialog)
@@ -517,6 +572,42 @@ class MainWindow(QtWidgets.QMainWindow):
         self.open_folder_action.setStatusTip(_("Open the containing folder in your file explorer"))
         self.open_folder_action.setEnabled(False)
         self.open_folder_action.triggered.connect(self.open_folder)
+
+        if self.tagger.autoupdate_enabled:
+            self.check_update_action = QtWidgets.QAction(_("&Check for Update…"), self)
+            self.check_update_action.setMenuRole(QtWidgets.QAction.ApplicationSpecificRole)
+            self.check_update_action.triggered.connect(self.do_update_check)
+
+    def _update_cd_lookup_actions(self, result=None, error=None):
+        if error:
+            log.error("CDROM: Error on CD-ROM drive detection: %r", error)
+        else:
+            self.update_cd_lookup_drives(result)
+
+    def update_cd_lookup_drives(self, drives):
+        if not drives:
+            log.warning("CDROM: No CD-ROM drives found - Lookup CD functionality disabled")
+        else:
+            shortcut_drive = config.setting["cd_lookup_device"].split(",")[0] if len(drives) > 1 else ""
+            self.cd_lookup_action.setEnabled(discid is not None)
+            self.cd_lookup_menu.clear()
+            for drive in drives:
+                action = self.cd_lookup_menu.addAction(drive)
+                action.setData(drive)
+                if drive == shortcut_drive:
+                    # Clear existing shortcode on main action and assign it to sub-action
+                    self.cd_lookup_action.setShortcut(QtGui.QKeySequence())
+                    action.setShortcut(QtGui.QKeySequence(_("Ctrl+K")))
+        self._update_cd_lookup_button()
+
+    def _update_cd_lookup_button(self):
+        if len(self.cd_lookup_menu.actions()) > 1:
+            button = self.toolbar.widgetForAction(self.cd_lookup_action)
+            if button:
+                button.setPopupMode(QtWidgets.QToolButton.MenuButtonPopup)
+            self.cd_lookup_action.setMenu(self.cd_lookup_menu)
+        else:
+            self.cd_lookup_action.setMenu(None)
 
     def toggle_rename_files(self, checked):
         config.setting["rename_files"] = checked
@@ -546,6 +637,8 @@ class MainWindow(QtWidgets.QMainWindow):
         menu = self.menuBar().addMenu(_("&File"))
         menu.addAction(self.add_directory_action)
         menu.addAction(self.add_files_action)
+        if self.show_close_window:
+            menu.addAction(self.close_window_action)
         menu.addSeparator()
         menu.addAction(self.play_file_action)
         menu.addAction(self.open_folder_action)
@@ -566,6 +659,8 @@ class MainWindow(QtWidgets.QMainWindow):
         menu.addSeparator()
         menu.addAction(self.show_toolbar_action)
         menu.addAction(self.search_toolbar_toggle_action)
+        if self.player:
+            menu.addAction(self.player_toolbar_toggle_action)
         menu = self.menuBar().addMenu(_("&Options"))
         menu.addAction(self.enable_renaming_action)
         menu.addAction(self.enable_moving_action)
@@ -574,10 +669,7 @@ class MainWindow(QtWidgets.QMainWindow):
         menu.addAction(self.options_action)
         menu = self.menuBar().addMenu(_("&Tools"))
         menu.addAction(self.refresh_action)
-        if len(self.cd_lookup_menu.actions()) > 1:
-            menu.addMenu(self.cd_lookup_menu)
-        else:
-            menu.addAction(self.cd_lookup_action)
+        menu.addAction(self.cd_lookup_action)
         menu.addAction(self.autotag_action)
         menu.addAction(self.analyze_action)
         menu.addAction(self.cluster_action)
@@ -591,6 +683,9 @@ class MainWindow(QtWidgets.QMainWindow):
         menu.addSeparator()
         menu.addAction(self.view_history_action)
         menu.addSeparator()
+        if self.tagger.autoupdate_enabled:
+            menu.addAction(self.check_update_action)
+            menu.addSeparator()
         menu.addAction(self.support_forum_action)
         menu.addAction(self.report_bug_action)
         menu.addAction(self.view_log_action)
@@ -601,16 +696,21 @@ class MainWindow(QtWidgets.QMainWindow):
     def update_toolbar_style(self):
         if config.setting["toolbar_show_labels"]:
             self.toolbar.setToolButtonStyle(QtCore.Qt.ToolButtonTextUnderIcon)
+            if self.player:
+                self.player.toolbar.setToolButtonStyle(QtCore.Qt.ToolButtonTextUnderIcon)
         else:
             self.toolbar.setToolButtonStyle(QtCore.Qt.ToolButtonIconOnly)
-
+            if self.player:
+                self.player.toolbar.setToolButtonStyle(QtCore.Qt.ToolButtonIconOnly)
 
     def create_toolbar(self):
         self.create_search_toolbar()
+        if self.player:
+            self.create_player_toolbar()
         self.create_action_toolbar()
 
     def create_action_toolbar(self):
-        if getattr(self, 'toolbar', None):
+        if self.toolbar:
             self.toolbar.clear()
             self.removeToolBar(self.toolbar)
         self.toolbar = toolbar = QtWidgets.QToolBar(_("Actions"))
@@ -627,10 +727,7 @@ class MainWindow(QtWidgets.QMainWindow):
         for action in config.setting['toolbar_layout']:
             if action == 'cd_lookup_action':
                 add_toolbar_action(self.cd_lookup_action)
-                if len(self.cd_lookup_menu.actions()) > 1:
-                    button = toolbar.widgetForAction(self.cd_lookup_action)
-                    button.setPopupMode(QtWidgets.QToolButton.MenuButtonPopup)
-                    button.setMenu(self.cd_lookup_menu)
+                self._update_cd_lookup_button()
             elif action == 'separator':
                 toolbar.addSeparator()
             else:
@@ -639,6 +736,13 @@ class MainWindow(QtWidgets.QMainWindow):
                 except AttributeError:
                     log.warning('Warning: Unknown action name "%r" found in config. Ignored.', action)
         self.show_toolbar()
+
+    def create_player_toolbar(self):
+        """"Create a toolbar with internal player control elements"""
+        toolbar = self.player.create_toolbar()
+        self.addToolBar(QtCore.Qt.BottomToolBarArea, toolbar)
+        self.player_toolbar_toggle_action = toolbar.toggleViewAction()
+        toolbar.hide()  # Hide by default
 
     def create_search_toolbar(self):
         self.search_toolbar = toolbar = self.addToolBar(_("Search"))
@@ -651,7 +755,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.search_combo.addItem(_("Artist"), "artist")
         self.search_combo.addItem(_("Track"), "track")
         hbox.addWidget(self.search_combo, 0)
-        self.search_edit = ButtonLineEdit(search_panel)
+        self.search_edit = QtWidgets.QLineEdit(search_panel)
+        self.search_edit.setClearButtonEnabled(True)
         self.search_edit.returnPressed.connect(self.trigger_search_action)
         self.search_edit.textChanged.connect(self.enable_search)
         hbox.addWidget(self.search_edit, 0)
@@ -660,6 +765,28 @@ class MainWindow(QtWidgets.QMainWindow):
         self.search_button.setDefaultAction(self.search_action)
         self.search_button.setIconSize(QtCore.QSize(22, 22))
         self.search_button.setAttribute(QtCore.Qt.WA_MacShowFocusRect)
+
+        # search button contextual menu, shortcut to toggle search options
+        def search_button_menu(position):
+            menu = QtWidgets.QMenu()
+            opts = OrderedDict([
+                ('use_adv_search_syntax', N_("&Advanced search")),
+                ('builtin_search', N_("&Builtin search"))
+            ])
+
+            def toggle_opt(opt, checked):
+                config.setting[opt] = checked
+
+            for opt, label in opts.items():
+                action = QtWidgets.QAction(_(label), menu)
+                action.setCheckable(True)
+                action.setChecked(config.setting[opt])
+                action.triggered.connect(partial(toggle_opt, opt))
+                menu.addAction(action)
+            menu.exec_(self.search_button.mapToGlobal(position))
+
+        self.search_button.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        self.search_button.customContextMenuRequested.connect(search_button_menu)
         hbox.addWidget(self.search_button)
         toolbar.addWidget(search_panel)
 
@@ -711,11 +838,16 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.search_action.isEnabled():
             self.search_action.trigger()
 
+    def search_mbid_found(self, entity, mbid):
+        self.search_edit.setText('%s:%s' % (entity, mbid))
+
     def search(self):
         """Search for album, artist or track on the MusicBrainz website."""
         text = self.search_edit.text()
-        type = self.search_combo.itemData(self.search_combo.currentIndex())
-        self.tagger.search(text, type, config.setting["use_adv_search_syntax"])
+        entity = self.search_combo.itemData(self.search_combo.currentIndex())
+        self.tagger.search(text, entity,
+                           config.setting["use_adv_search_syntax"],
+                           mbid_matched_callback=self.search_mbid_found)
 
     def add_files(self):
         """Add files to the tagger."""
@@ -766,12 +898,22 @@ class MainWindow(QtWidgets.QMainWindow):
             for directory in dir_list:
                 self.tagger.add_directory(directory)
 
+    def close_active_window(self):
+        self.tagger.activeWindow().close()
+
     def show_about(self):
         self.show_options("about")
 
     def show_options(self, page=None):
-        dialog = OptionsDialog(page, self)
-        dialog.exec_()
+        if not self.optionsDialog:
+            self.optionsDialog = OptionsDialog(page, self)
+            self.optionsDialog.finished.connect(self.on_options_closed)
+        self.optionsDialog.show()
+        self.optionsDialog.raise_()
+        self.optionsDialog.activateWindow()
+
+    def on_options_closed(self):
+        self.optionsDialog = None
 
     def show_help(self):
         webbrowser2.goto('documentation')
@@ -811,18 +953,16 @@ class MainWindow(QtWidgets.QMainWindow):
                 return
         return self.tagger.analyze(self.selected_objects)
 
-    def _openUrl(self,url):
-        # Resolves a bug in Qt opening remote URLs - QTBUG-13359
-        # See https://bugreports.qt.io/browse/QTBUG-13359
-        if url.startswith("\\\\") or url.startswith("//"):
-            return QtCore.QUrl(QtCore.QDir.toNativeSeparators(url))
-        else:
-            return QtCore.QUrl.fromLocalFile(url)
+    def _openUrl(self, url):
+        return QtCore.QUrl.fromLocalFile(url)
 
     def play_file(self):
         files = self.tagger.get_files_from_objects(self.selected_objects)
         for file in files:
             QtGui.QDesktopServices.openUrl(self._openUrl(file.filename))
+
+    def _on_player_error(self, error, msg):
+        self.set_statusbar_message(msg, echo=log.warning, translate=None)
 
     def open_folder(self):
         files = self.tagger.get_files_from_objects(self.selected_objects)
@@ -938,6 +1078,9 @@ class MainWindow(QtWidgets.QMainWindow):
         # Clear any existing status bar messages
         self.set_statusbar_message("")
 
+        if self.player:
+            self.player.set_objects(self.selected_objects)
+
         if len(objects) == 1:
             obj = list(objects)[0]
             if isinstance(obj, File):
@@ -978,7 +1121,7 @@ class MainWindow(QtWidgets.QMainWindow):
             elif isinstance(obj, Album):
                 metadata = obj.metadata
                 orig_metadata = obj.orig_metadata
-            elif obj.can_edit_tags():
+            elif obj.can_show_coverart:
                 metadata = obj.metadata
 
         self.metadata_box.selection_dirty = True
@@ -1019,10 +1162,14 @@ class MainWindow(QtWidgets.QMainWindow):
                 QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
                 QtWidgets.QMessageBox.Yes)
             if ret == QtWidgets.QMessageBox.Yes:
-                pass
+                self.tagger.mb_login(self.on_mb_login_finished)
         else:
             dialog = PasswordDialog(authenticator, reply, parent=self)
             dialog.exec_()
+
+    @classmethod
+    def on_mb_login_finished(self, successful):
+        log.debug('MusicBrainz authentication finished: %s', successful)
 
     def show_proxy_dialog(self, proxy, authenticator):
         dialog = ProxyDialog(authenticator, proxy, parent=self)
@@ -1043,3 +1190,38 @@ class MainWindow(QtWidgets.QMainWindow):
             target = selected_objects[0]
         self.tagger.paste_files(target)
         self.paste_action.setEnabled(False)
+
+    def do_update_check(self):
+        self.check_for_update(True)
+
+    def auto_update_check(self):
+        check_for_updates = config.setting['check_for_updates']
+        update_check_days = config.setting['update_check_days']
+        last_update_check = config.persist['last_update_check']
+        update_level = config.setting['update_level']
+        today = datetime.date.today().toordinal()
+        do_auto_update_check = check_for_updates and update_check_days > 0 and today >= last_update_check + update_check_days
+        log.debug('{check_status} start-up check for program updates.  Today: {today_date}, Last check: {last_check} (Check interval: {check_interval} days), Update level: {update_level} ({update_level_name})'.format(
+            check_status='Initiating' if do_auto_update_check else 'Skipping',
+            today_date=datetime.date.today(),
+            last_check=str(datetime.date.fromordinal(last_update_check)) if last_update_check > 0 else 'never',
+            check_interval=update_check_days,
+            update_level=update_level,
+            update_level_name=PROGRAM_UPDATE_LEVELS[update_level]['name'] if update_level in PROGRAM_UPDATE_LEVELS else 'unknown',
+        ))
+        if do_auto_update_check:
+            self.check_for_update(False)
+
+    def check_for_update(self, show_always):
+        self.tagger.updatecheckmanager.check_update(
+            show_always=show_always,
+            update_level=config.setting['update_level'],
+            callback=update_last_check_date
+        )
+
+
+def update_last_check_date(is_success):
+    if is_success:
+        config.persist['last_update_check'] = datetime.date.today().toordinal()
+    else:
+        log.debug('The update check was unsuccessful. The last update date will not be changed.')

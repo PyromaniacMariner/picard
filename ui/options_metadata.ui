@@ -50,6 +50,13 @@
        </widget>
       </item>
       <item>
+       <widget class="QCheckBox" name="standardize_instruments">
+        <property name="text">
+         <string>Use standardized instrument and vocal credits</string>
+        </property>
+       </widget>
+      </item>
+      <item>
        <widget class="QCheckBox" name="convert_punctuation">
         <property name="text">
          <string>Convert Unicode punctuation characters to ASCII</string>
@@ -67,13 +74,6 @@
        <widget class="QCheckBox" name="track_ars">
         <property name="text">
          <string>Use track relationships</string>
-        </property>
-       </widget>
-      </item>
-      <item>
-       <widget class="QCheckBox" name="folksonomy_tags">
-        <property name="text">
-         <string>Use folksonomy tags as genre</string>
         </property>
        </widget>
       </item>
@@ -169,7 +169,6 @@
   <tabstop>convert_punctuation</tabstop>
   <tabstop>release_ars</tabstop>
   <tabstop>track_ars</tabstop>
-  <tabstop>folksonomy_tags</tabstop>
   <tabstop>va_name</tabstop>
   <tabstop>va_name_default</tabstop>
   <tabstop>nat_name</tabstop>

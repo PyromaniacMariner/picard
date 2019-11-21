@@ -17,11 +17,18 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 
-from __future__ import print_function
 from operator import itemgetter
+
 from PyQt5 import QtCore
-from picard import (PICARD_APP_NAME, PICARD_ORG_NAME, PICARD_VERSION,
-                    version_to_string, version_from_string)
+
+from picard import (
+    PICARD_APP_NAME,
+    PICARD_ORG_NAME,
+    PICARD_VERSION,
+    log,
+    version_from_string,
+    version_to_string,
+)
 from picard.util import LockableObject
 
 
@@ -34,9 +41,19 @@ class ConfigSection(LockableObject):
     """Configuration section."""
 
     def __init__(self, config, name):
-        LockableObject.__init__(self)
-        self.__config = config
+        super().__init__()
+        self.__qt_config = config
         self.__name = name
+        self.__prefix = self.__name + '/'
+        self.__prefix_len = len(self.__prefix)
+
+    def key(self, name):
+        return self.__prefix + name
+
+    def _subkeys(self):
+        for key in self.__qt_config.allKeys():
+            if key[:self.__prefix_len] == self.__prefix:
+                yield key[self.__prefix_len:]
 
     def __getitem__(self, name):
         opt = Option.get(self.__name, name)
@@ -47,33 +64,39 @@ class ConfigSection(LockableObject):
     def __setitem__(self, name, value):
         self.lock_for_write()
         try:
-            self.__config.setValue("%s/%s" % (self.__name, name), value)
+            self.__qt_config.setValue(self.key(name), value)
         finally:
             self.unlock()
 
-    def __contains__(self, key):
-        key = "%s/%s" % (self.__name, key)
-        return self.__config.contains(key)
+    def __contains__(self, name):
+        return self.__qt_config.contains(self.key(name))
 
-    def remove(self, key):
-        key = "%s/%s" % (self.__name, key)
-        if self.__config.contains(key):
-            self.__config.remove(key)
+    def remove(self, name):
+        self.lock_for_write()
+        try:
+            if name in self:
+                self.__qt_config.remove(self.key(name))
+        finally:
+            self.unlock()
 
-    def raw_value(self, key):
+    def raw_value(self, name, qtype=None):
         """Return an option value without any type conversion."""
-        value = self.__config.value("%s/%s" % (self.__name, key))
-        return value
+        key = self.key(name)
+        if qtype is not None:
+            return self.__qt_config.value(key, type=qtype)
+        else:
+            return self.__qt_config.value(key)
 
     def value(self, name, option_type, default=None):
         """Return an option value converted to the given Option type."""
-        key = "%s/%s" % (self.__name, name)
         self.lock_for_read()
         try:
-            if self.__config.contains(key):
-                return option_type.convert(self.raw_value(name))
+            if name in self:
+                value = self.raw_value(name, qtype=option_type.qtype)
+                return option_type.convert(value)
             return default
-        except:
+        except Exception as why:
+            log.error('Cannot read %s value: %s', self.key(name), why, exc_info=True)
             return default
         finally:
             self.unlock()
@@ -84,19 +107,11 @@ class Config(QtCore.QSettings):
     """Configuration."""
 
     def __init__(self):
-        pass
+        self.__known_keys = set()
 
     def __initialize(self):
         """Common initializer method for :meth:`from_app` and
         :meth:`from_file`."""
-
-        # If there are no settings, copy existing settings from old format
-        # (registry on windows systems)
-        if not self.allKeys():
-            oldFormat = QtCore.QSettings(PICARD_ORG_NAME, PICARD_APP_NAME)
-            for k in oldFormat.allKeys():
-                self.setValue(k, oldFormat.value(k))
-            self.sync()
 
         self.application = ConfigSection(self, "application")
         self.setting = ConfigSection(self, "setting")
@@ -107,6 +122,12 @@ class Config(QtCore.QSettings):
         TextOption("application", "version", '0.0.0dev0')
         self._version = version_from_string(self.application["version"])
         self._upgrade_hooks = dict()
+        # Save known config names for faster access and to prevent
+        # strange cases of Qt locking up when accessing QSettings.allKeys()
+        # or QSettings.contains() shortly after having written settings
+        # inside threads.
+        # See https://tickets.metabrainz.org/browse/PICARD-1590
+        self.__known_keys = set(self.allKeys())
 
     @classmethod
     def from_app(cls, parent):
@@ -116,6 +137,15 @@ class Config(QtCore.QSettings):
         QtCore.QSettings.__init__(this, QtCore.QSettings.IniFormat,
                                   QtCore.QSettings.UserScope, PICARD_ORG_NAME,
                                   PICARD_APP_NAME, parent)
+
+        # If there are no settings, copy existing settings from old format
+        # (registry on windows systems)
+        if not this.allKeys():
+            oldFormat = QtCore.QSettings(PICARD_ORG_NAME, PICARD_APP_NAME)
+            for k in oldFormat.allKeys():
+                this.setValue(k, oldFormat.value(k))
+            this.sync()
+
         this.__initialize()
         return this
 
@@ -128,6 +158,19 @@ class Config(QtCore.QSettings):
                                   parent)
         this.__initialize()
         return this
+
+    def setValue(self, key, value):
+        super().setValue(key, value)
+        self.__known_keys.add(key)
+
+    def remove(self, key):
+        super().remove(key)
+        self.__known_keys.discard(key)
+
+    def contains(self, key):
+        # Overwritten due to https://tickets.metabrainz.org/browse/PICARD-1590
+        # See comment above in __initialize
+        return key in self.__known_keys or super().contains(key)
 
     def switchProfile(self, profilename):
         """Sets the current profile."""
@@ -168,8 +211,8 @@ class Config(QtCore.QSettings):
                                    version_to_string(self._version),
                                    version_to_string(version),
                                    hook['func'].__doc__.strip()))
-                    hook['func'](*hook['args'])
-                except:
+                    hook['func'](self, *hook['args'])
+                except BaseException:
                     import traceback
                     raise ConfigUpgradeError(
                         "Error during config upgrade from version %s to %s "
@@ -202,6 +245,7 @@ class Option(QtCore.QObject):
     """Generic option."""
 
     registry = {}
+    qtype = None
 
     def __init__(self, section, name, default):
         super().__init__()
@@ -220,18 +264,13 @@ class Option(QtCore.QObject):
 class TextOption(Option):
 
     convert = str
+    qtype = 'QString'
 
 
 class BoolOption(Option):
 
-    @staticmethod
-    def convert(value):
-        # The QSettings IniFormat saves boolean values as the strings "true"
-        # and "false". Thus, explicit boolean and string comparisons are used
-        # to determine the value. NOTE: In PyQt >= 4.8.3, QSettings.value has
-        # an optional "type" parameter that avoids this. But we still support
-        # PyQt >= 4.5, so that is not used.
-        return value is True or value == "true"
+    convert = bool
+    qtype = bool
 
 
 class IntOption(Option):
@@ -247,13 +286,7 @@ class FloatOption(Option):
 class ListOption(Option):
 
     convert = list
-
-
-class IntListOption(Option):
-
-    @staticmethod
-    def convert(values):
-        return list(map(int, values))
+    qtype = 'QVariantList'
 
 
 config = None

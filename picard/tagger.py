@@ -18,24 +18,96 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 
-from __future__ import print_function
-import sip
-
-sip.setapi("QString", 2)
-sip.setapi("QVariant", 2)
-
-from PyQt5 import QtGui, QtCore, QtWidgets
-
 import argparse
+from functools import partial
+from itertools import chain
+import logging
+from operator import attrgetter
 import os.path
 import platform
 import re
 import shutil
 import signal
 import sys
-from functools import partial
-from itertools import chain
-from operator import attrgetter
+
+from PyQt5 import (
+    QtCore,
+    QtGui,
+    QtWidgets,
+)
+from PyQt5.QtDBus import QDBusConnection
+
+from picard import (
+    PICARD_APP_ID,
+    PICARD_APP_NAME,
+    PICARD_DESKTOP_NAME,
+    PICARD_FANCY_VERSION_STR,
+    PICARD_ORG_NAME,
+    acoustid,
+    config,
+    log,
+)
+from picard.acoustid.manager import AcoustIDManager
+from picard.album import (
+    Album,
+    NatAlbum,
+    run_album_post_removal_processors,
+)
+from picard.browser.browser import BrowserIntegration
+from picard.browser.filelookup import FileLookup
+from picard.cluster import (
+    Cluster,
+    ClusterList,
+    UnclusteredFiles,
+)
+from picard.collection import load_user_collections
+from picard.config_upgrade import upgrade_config
+from picard.const import (
+    USER_DIR,
+    USER_PLUGIN_DIR,
+)
+from picard.const.sys import (
+    IS_FROZEN,
+    IS_HAIKU,
+    IS_MACOS,
+    IS_WIN,
+)
+from picard.dataobj import DataObject
+from picard.disc import Disc
+from picard.file import File
+from picard.formats import open_ as open_file
+from picard.i18n import setup_gettext
+from picard.pluginmanager import PluginManager
+from picard.releasegroup import ReleaseGroup
+from picard.track import (
+    NonAlbumTrack,
+    Track,
+)
+from picard.util import (
+    check_io_encoding,
+    decode_filename,
+    encode_filename,
+    is_hidden,
+    mbid_validate,
+    thread,
+    uniqify,
+    versions,
+    webbrowser2,
+)
+from picard.util.checkupdate import UpdateCheckManager
+from picard.webservice import WebService
+from picard.webservice.api_helpers import (
+    AcoustIdAPIHelper,
+    MBAPIHelper,
+)
+
+import picard.resources  # noqa: F401 # pylint: disable=unused-import
+
+from picard.ui.itemviews import BaseTreeView
+from picard.ui.mainwindow import MainWindow
+from picard.ui.searchdialog.album import AlbumSearchDialog
+from picard.ui.searchdialog.artist import ArtistSearchDialog
+from picard.ui.searchdialog.track import TrackSearchDialog
 
 
 # A "fix" for https://bugs.python.org/issue1438480
@@ -49,46 +121,6 @@ def _patched_shutil_copystat(src, dst, *, follow_symlinks=True):
 _orig_shutil_copystat = shutil.copystat
 shutil.copystat = _patched_shutil_copystat
 
-import picard.resources
-from picard.i18n import setup_gettext
-
-from picard import (PICARD_APP_NAME, PICARD_ORG_NAME, PICARD_FANCY_VERSION_STR,
-                    log, acoustid, config)
-from picard.album import Album, NatAlbum
-from picard.browser.browser import BrowserIntegration
-from picard.browser.filelookup import FileLookup
-from picard.cluster import Cluster, ClusterList, UnclusteredFiles
-from picard.const import USER_DIR, USER_PLUGIN_DIR
-from picard.dataobj import DataObject
-from picard.disc import Disc
-from picard.file import File
-from picard.formats import open_ as open_file
-from picard.track import Track, NonAlbumTrack
-from picard.releasegroup import ReleaseGroup
-from picard.collection import load_user_collections
-from picard.ui.mainwindow import MainWindow
-from picard.ui.itemviews import BaseTreeView
-from picard.plugin import PluginManager
-from picard.acoustid.manager import AcoustIDManager
-from picard.config_upgrade import upgrade_config
-from picard.util import (
-    decode_filename,
-    encode_filename,
-    thread,
-    mbid_validate,
-    check_io_encoding,
-    uniqify,
-    is_hidden,
-    versions,
-)
-from picard.webservice import WebService
-from picard.webservice.api_helpers import MBAPIHelper, AcoustIdAPIHelper
-from picard.ui.searchdialog import (
-    TrackSearchDialog,
-    AlbumSearchDialog,
-    ArtistSearchDialog
-)
-
 
 class Tagger(QtWidgets.QApplication):
 
@@ -101,31 +133,52 @@ class Tagger(QtWidgets.QApplication):
 
     __instance = None
 
+    _debug = False
+    _no_restore = False
+
     def __init__(self, picard_args, unparsed_args, localedir, autoupdate):
+
+        # Use the new fusion style from PyQt5 for a modern and consistent look
+        # across all OSes.
+        if not IS_MACOS and not IS_HAIKU:
+            self.setStyle('Fusion')
+
         # Set the WM_CLASS to 'MusicBrainz-Picard' so desktop environments
         # can use it to look up the app
-        QtWidgets.QApplication.__init__(self, ['MusicBrainz-Picard'] + unparsed_args)
+        super().__init__(['MusicBrainz-Picard'] + unparsed_args)
         self.__class__.__instance = self
         config._setup(self, picard_args.config_file)
 
-        # Allow High DPI Support
-        self.setAttribute(QtCore.Qt.AA_UseHighDpiPixmaps)
-        self.setAttribute(QtCore.Qt.AA_EnableHighDpiScaling)
+        super().setStyleSheet(
+            'QGroupBox::title { /* PICARD-1206, Qt bug workaround */ }'
+        )
 
         self._cmdline_files = picard_args.FILE
-        self._autoupdate = autoupdate
-        self._debug = False
+        self.autoupdate_enabled = autoupdate
+        self._no_restore = picard_args.no_restore
+        self._no_plugins = picard_args.no_plugins
+
+        self.set_log_level(config.setting['log_verbosity'])
+
+        if picard_args.debug or "PICARD_DEBUG" in os.environ:
+            self.set_log_level(logging.DEBUG)
 
         # FIXME: Figure out what's wrong with QThreadPool.globalInstance().
         # It's a valid reference, but its start() method doesn't work.
         self.thread_pool = QtCore.QThreadPool(self)
+
+        # Provide a separate thread pool for operations that should not be
+        # delayed by longer background processing tasks, e.g. because the user
+        # expects instant feedback instead of waiting for a long list of
+        # operations to finish.
+        self.priority_thread_pool = QtCore.QThreadPool(self)
 
         # Use a separate thread pool for file saving, with a thread count of 1,
         # to avoid race conditions in File._save_and_rename.
         self.save_thread_pool = QtCore.QThreadPool(self)
         self.save_thread_pool.setMaxThreadCount(1)
 
-        if not sys.platform == "win32":
+        if not IS_WIN:
             # Set up signal handling
             # It's not possible to call all available functions from signal
             # handlers, therefore we need to set up a QSocketNotifier to listen
@@ -148,26 +201,19 @@ class Tagger(QtWidgets.QApplication):
             signal.signal(signal.SIGINT, self.signal)
             signal.signal(signal.SIGTERM, self.signal)
 
+        if IS_MACOS:
+            # On macOS it is not common that the global menu shows icons
+            self.setAttribute(QtCore.Qt.AA_DontShowIconsInMenus)
+            # Ensure monospace font works on macOS
+            QtGui.QFont.insertSubstitution('Monospace', 'Menlo')
+
         # Setup logging
-        self.debug(picard_args.debug or "PICARD_DEBUG" in os.environ)
         log.debug("Starting Picard from %r", os.path.abspath(__file__))
         log.debug("Platform: %s %s %s", platform.platform(),
                   platform.python_implementation(), platform.python_version())
         log.debug("Versions: %s", versions.as_string())
         log.debug("Configuration file path: %r", config.config.fileName())
 
-        # TODO remove this before the final release
-        if sys.platform == "win32":
-            olduserdir = "~\\Local Settings\\Application Data\\MusicBrainz Picard"
-        else:
-            olduserdir = "~/.picard"
-        olduserdir = os.path.expanduser(olduserdir)
-        if os.path.isdir(olduserdir):
-            log.info("Moving %r to %r", olduserdir, USER_DIR)
-            try:
-                shutil.move(olduserdir, USER_DIR)
-            except:
-                pass
         log.debug("User directory: %r", os.path.abspath(USER_DIR))
 
         # for compatibility with pre-1.3 plugins
@@ -181,7 +227,7 @@ class Tagger(QtWidgets.QApplication):
         # translated
         setup_gettext(localedir, config.setting["ui_language"], log.debug)
 
-        upgrade_config()
+        upgrade_config(config.config)
 
         self.webservice = WebService()
         self.mb_api = MBAPIHelper(self.webservice)
@@ -195,17 +241,16 @@ class Tagger(QtWidgets.QApplication):
 
         # Load plugins
         self.pluginmanager = PluginManager()
-        if hasattr(sys, "frozen"):
-            self.pluginmanager.load_plugindir(os.path.join(os.path.dirname(sys.argv[0]), "plugins"))
-        else:
-            mydir = os.path.dirname(os.path.abspath(__file__))
-            self.pluginmanager.load_plugindir(os.path.join(mydir, "plugins"))
-            self.pluginmanager.load_plugindir(os.path.join(mydir, os.pardir, "contrib", "plugins"))
+        if not self._no_plugins:
+            if IS_FROZEN:
+                self.pluginmanager.load_plugins_from_directory(os.path.join(os.path.dirname(sys.argv[0]), "plugins"))
+            else:
+                mydir = os.path.dirname(os.path.abspath(__file__))
+                self.pluginmanager.load_plugins_from_directory(os.path.join(mydir, "plugins"))
 
-        if not os.path.exists(USER_PLUGIN_DIR):
-            os.makedirs(USER_PLUGIN_DIR)
-        self.pluginmanager.load_plugindir(USER_PLUGIN_DIR)
-        self.pluginmanager.query_available_plugins()
+            if not os.path.exists(USER_PLUGIN_DIR):
+                os.makedirs(USER_PLUGIN_DIR)
+            self.pluginmanager.load_plugins_from_directory(USER_PLUGIN_DIR)
 
         self.acoustidmanager = AcoustIDManager()
         self.browser_integration = BrowserIntegration()
@@ -221,6 +266,10 @@ class Tagger(QtWidgets.QApplication):
         self.exit_cleanup = []
         self.stopping = False
 
+        # Load release version information
+        if self.autoupdate_enabled:
+            self.updatecheckmanager = UpdateCheckManager(parent=self.window)
+
     def register_cleanup(self, func):
         self.exit_cleanup.append(func)
 
@@ -228,16 +277,45 @@ class Tagger(QtWidgets.QApplication):
         for f in self.exit_cleanup:
             f()
 
-    def debug(self, debug):
-        if self._debug == debug:
-            return
-        if debug:
-            log.log_levels = log.log_levels | log.LOG_DEBUG
-            log.debug("Debug mode on")
+    def set_log_level(self, level):
+        self._debug = level == logging.DEBUG
+        log.set_level(level)
+
+    def mb_login(self, callback, parent=None):
+        scopes = "profile tag rating collection submit_isrc submit_barcode"
+        authorization_url = self.webservice.oauth_manager.get_authorization_url(scopes)
+        webbrowser2.open(authorization_url)
+        if not parent:
+            parent = self.window
+        dialog = QtWidgets.QInputDialog(parent)
+        dialog.setWindowModality(QtCore.Qt.WindowModal)
+        dialog.setWindowTitle(_("MusicBrainz Account"))
+        dialog.setLabelText(_("Authorization code:"))
+        status = dialog.exec_()
+        if status == QtWidgets.QDialog.Accepted:
+            authorization_code = dialog.textValue()
+            self.webservice.oauth_manager.exchange_authorization_code(
+                authorization_code, scopes,
+                partial(self.on_mb_authorization_finished, callback))
         else:
-            log.debug("Debug mode off")
-            log.log_levels = log.log_levels & ~log.LOG_DEBUG
-        self._debug = debug
+            callback(False)
+
+    def on_mb_authorization_finished(self, callback, successful=False):
+        if successful:
+            self.webservice.oauth_manager.fetch_username(
+                partial(self.on_mb_login_finished, callback))
+        else:
+            callback(False)
+
+    @classmethod
+    def on_mb_login_finished(self, callback, successful):
+        if successful:
+            load_user_collections()
+        callback(successful)
+
+    def mb_logout(self):
+        self.webservice.oauth_manager.revoke_tokens()
+        load_user_collections()
 
     def move_files_to_album(self, files, albumid=None, album=None):
         """Move `files` to tracks on album `albumid`."""
@@ -257,13 +335,15 @@ class Tagger(QtWidgets.QApplication):
         """Move `file` to recording `recordingid` on album `albumid`."""
         album = self.load_album(albumid)
         file.move(album.unmatched_files)
-        album.run_when_loaded(partial(album.match_file, file, recordingid))
+        album.run_when_loaded(partial(album.match_files, [file],
+                                      recordingid=recordingid))
 
     def create_nats(self):
         if self.nats is None:
             self.nats = NatAlbum()
             self.albums["NATS"] = self.nats
             self.album_added.emit(self.nats)
+            self.nats.item.setExpanded(True)
         return self.nats
 
     def move_file_to_nat(self, file, recordingid, node=None):
@@ -275,11 +355,14 @@ class Tagger(QtWidgets.QApplication):
             self.nats.update()
 
     def exit(self):
-        log.debug("Picard stopping")
+        if self.stopping:
+            return
         self.stopping = True
+        log.debug("Picard stopping")
         self._acoustid.done()
         self.thread_pool.waitForDone()
         self.save_thread_pool.waitForDone()
+        self.priority_thread_pool.waitForDone()
         self.browser_integration.stop()
         self.webservice.stop()
         self.run_cleanup()
@@ -310,34 +393,50 @@ class Tagger(QtWidgets.QApplication):
         if isinstance(event, thread.ProxyToMainEvent):
             event.run()
         elif event.type() == QtCore.QEvent.FileOpen:
-            f = string_(event.file())
-            self.add_files([f])
+            self.add_files([event.file()])
             # We should just return True here, except that seems to
             # cause the event's sender to get a -9874 error, so
             # apparently there's some magic inside QFileOpenEvent...
             return 1
-        return QtWidgets.QApplication.event(self, event)
+        return super().event(event)
 
     def _file_loaded(self, file, target=None):
-        if file is not None and not file.has_error():
-            recordingid = file.metadata.getall('musicbrainz_recordingid')[0] \
-                if 'musicbrainz_recordingid' in file.metadata else ''
-            if target is not None:
-                self.move_files([file], target)
-            elif not config.setting["ignore_file_mbids"]:
-                albumid = file.metadata.getall('musicbrainz_albumid')[0] \
-                    if 'musicbrainz_albumid' in file.metadata else ''
-                if mbid_validate(albumid):
-                    if mbid_validate(recordingid):
-                        self.move_file_to_track(file, albumid, recordingid)
-                    else:
-                        self.move_file_to_album(file, albumid)
-                elif mbid_validate(recordingid):
-                    self.move_file_to_nat(file, recordingid)
-                elif config.setting['analyze_new_files'] and file.can_analyze():
-                    self.analyze([file])
-            elif config.setting['analyze_new_files'] and file.can_analyze():
-                self.analyze([file])
+        if file is None or file.has_error():
+            return
+
+        if target is not None:
+            self.move_files([file], target)
+            return
+
+        if not config.setting["ignore_file_mbids"]:
+            recordingid = file.metadata['musicbrainz_recordingid']
+            is_valid_recordingid = mbid_validate(recordingid)
+
+            albumid = file.metadata['musicbrainz_albumid']
+            is_valid_albumid = mbid_validate(albumid)
+
+            if is_valid_albumid and is_valid_recordingid:
+                log.debug("%r has release (%s) and recording (%s) MBIDs, moving to track...",
+                          file, albumid, recordingid)
+                self.move_file_to_track(file, albumid, recordingid)
+                return
+
+            if is_valid_albumid:
+                log.debug("%r has only release MBID (%s), moving to album...",
+                          file, albumid)
+                self.move_file_to_album(file, albumid)
+                return
+
+            if is_valid_recordingid:
+                log.debug("%r has only recording MBID (%s), moving to non-album track...",
+                          file, recordingid)
+                self.move_file_to_nat(file, recordingid)
+                return
+
+        # fallback on analyze if nothing else worked
+        if config.setting['analyze_new_files'] and file.can_analyze():
+            log.debug("Trying to analyze %r ...", file)
+            self.analyze([file])
 
     def move_files(self, files, target):
         if target is None:
@@ -475,24 +574,34 @@ class Tagger(QtWidgets.QApplication):
         if mimeData.hasUrls():
             BaseTreeView.drop_urls(mimeData.urls(), target)
 
-    def search(self, text, search_type, adv=False):
+    def search(self, text, search_type, adv=False, mbid_matched_callback=None, force_browser=False):
         """Search on the MusicBrainz website."""
+        search_types = {
+            'track': {
+                'entity': 'recording',
+                'dialog': TrackSearchDialog
+            },
+            'album': {
+                'entity': 'release',
+                'dialog': AlbumSearchDialog
+            },
+            'artist': {
+                'entity': 'artist',
+                'dialog': ArtistSearchDialog
+            },
+        }
+        if search_type not in search_types:
+            return
+        search = search_types[search_type]
         lookup = self.get_file_lookup()
-        if config.setting["builtin_search"]:
-            if search_type == "track" and not lookup.mbid_lookup(text, 'recording'):
-                dialog = TrackSearchDialog(self.window)
-                dialog.search(text)
-                dialog.exec_()
-            elif search_type == "album" and not lookup.mbid_lookup(text, 'release'):
-                dialog = AlbumSearchDialog(self.window)
-                dialog.search(text)
-                dialog.exec_()
-            elif search_type == "artist" and not lookup.mbid_lookup(text, 'artist'):
-                dialog = ArtistSearchDialog(self.window)
+        if config.setting["builtin_search"] and not force_browser:
+            if not lookup.mbid_lookup(text, search['entity'],
+                                      mbid_matched_callback=mbid_matched_callback):
+                dialog = search['dialog'](self.window)
                 dialog.search(text)
                 dialog.exec_()
         else:
-            getattr(lookup, search_type + "_search")(text, adv)
+            lookup.search_entity(search['entity'], text, adv, mbid_matched_callback=mbid_matched_callback)
 
     def collection_lookup(self):
         """Lookup the users collections on the MusicBrainz website."""
@@ -516,7 +625,7 @@ class Tagger(QtWidgets.QApplication):
                 metadata["album"],
                 metadata["title"],
                 metadata["tracknumber"],
-                '' if item.is_album_like() else string_(metadata.length),
+                '' if item.is_album_like() else str(metadata.length),
                 item.filename if isinstance(item, File) else '')
 
     def get_files_from_objects(self, objects, save=False):
@@ -534,6 +643,7 @@ class Tagger(QtWidgets.QApplication):
         album = self.albums.get(album_id)
         if album:
             log.debug("Album %s already loaded.", album_id)
+            album.add_discid(discid)
             return album
         album = Album(album_id, discid=discid)
         self.albums[album_id] = album
@@ -573,10 +683,13 @@ class Tagger(QtWidgets.QApplication):
                 self._acoustid.stop_analyze(file)
                 del self.files[file.filename]
                 file.remove(from_parent)
+        self.tagger_stats_changed.emit()
 
     def remove_album(self, album):
         """Remove the specified album."""
         log.debug("Removing %r", album)
+        if album.id not in self.albums:
+            return
         album.stop_loading()
         self.remove_files(self.get_files_from_objects([album]))
         del self.albums[album.id]
@@ -585,6 +698,18 @@ class Tagger(QtWidgets.QApplication):
         if album == self.nats:
             self.nats = None
         self.album_removed.emit(album)
+        run_album_post_removal_processors(album)
+        self.tagger_stats_changed.emit()
+
+    def remove_nat(self, track):
+        """Remove the specified non-album track."""
+        log.debug("Removing %r", track)
+        self.remove_files(self.get_files_from_objects([track]))
+        self.nats.tracks.remove(track)
+        if not self.nats.tracks:
+            self.remove_album(self.nats)
+        else:
+            self.nats.update(True)
 
     def remove_cluster(self, cluster):
         """Remove the specified cluster."""
@@ -603,6 +728,8 @@ class Tagger(QtWidgets.QApplication):
         for obj in objects:
             if isinstance(obj, File):
                 files.append(obj)
+            elif isinstance(obj, NonAlbumTrack):
+                self.remove_nat(obj)
             elif isinstance(obj, Track):
                 files.extend(obj.linked_files)
             elif isinstance(obj, Album):
@@ -626,14 +753,14 @@ class Tagger(QtWidgets.QApplication):
         self.restore_cursor()
         if error is not None:
             QtWidgets.QMessageBox.critical(self.window, _("CD Lookup Error"),
-                                       _("Error while reading CD:\n\n%s") % error)
+                                           _("Error while reading CD:\n\n%s") % error)
         else:
             disc.lookup()
 
     def lookup_cd(self, action):
         """Reads CD from the selected drive and tries to lookup the DiscID on MusicBrainz."""
         if isinstance(action, QtWidgets.QAction):
-            device = action.text()
+            device = action.data()
         elif config.setting["cd_lookup_device"] != '':
             device = config.setting["cd_lookup_device"].split(",", 1)[0]
         else:
@@ -644,7 +771,8 @@ class Tagger(QtWidgets.QApplication):
         self.set_wait_cursor()
         thread.run_task(
             partial(disc.read, encode_filename(device)),
-            partial(self._lookup_disc, disc))
+            partial(self._lookup_disc, disc),
+            traceback=self._debug)
 
     @property
     def use_acoustid(self):
@@ -652,11 +780,13 @@ class Tagger(QtWidgets.QApplication):
 
     def analyze(self, objs):
         """Analyze the file(s)."""
+        if not self.use_acoustid:
+            return
         files = self.get_files_from_objects(objs)
         for file in files:
             file.set_pending()
-            if self.use_acoustid:
-                self._acoustid.analyze(file, partial(file._lookup_finished, 'acoustid'))
+            self._acoustid.analyze(file, partial(file._lookup_finished,
+                                                 File.LOOKUP_ACOUSTID))
 
     # =======================================================================
     #  Metadata-based lookups
@@ -700,12 +830,12 @@ class Tagger(QtWidgets.QApplication):
 
     def set_wait_cursor(self):
         """Sets the waiting cursor."""
-        QtWidgets.QApplication.setOverrideCursor(
+        super().setOverrideCursor(
             QtGui.QCursor(QtCore.Qt.WaitCursor))
 
     def restore_cursor(self):
         """Restores the cursor set by ``set_wait_cursor``."""
-        QtWidgets.QApplication.restoreOverrideCursor()
+        super().restoreOverrideCursor()
 
     def refresh(self, objs):
         for obj in objs:
@@ -751,6 +881,10 @@ def process_picard_args():
                         help="location of the configuration file")
     parser.add_argument("-d", "--debug", action='store_true',
                         help="enable debug-level logging")
+    parser.add_argument("-N", "--no-restore", action='store_true',
+                        help="do not restore positions and/or sizes")
+    parser.add_argument("-P", "--no-plugins", action='store_true',
+                        help="do not load any plugins")
     parser.add_argument('-v', '--version', action='store_true',
                         help="display version information and exit")
     parser.add_argument("-V", "--long-version", action='store_true',
@@ -764,6 +898,11 @@ def main(localedir=None, autoupdate=True):
     # Some libs (ie. Phonon) require those to be set
     QtWidgets.QApplication.setApplicationName(PICARD_APP_NAME)
     QtWidgets.QApplication.setOrganizationName(PICARD_ORG_NAME)
+    QtWidgets.QApplication.setDesktopFileName(PICARD_DESKTOP_NAME)
+
+    # Allow High DPI Support
+    QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_UseHighDpiPixmaps)
+    QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_EnableHighDpiScaling)
 
     signal.signal(signal.SIGINT, signal.SIG_DFL)
 
@@ -773,6 +912,21 @@ def main(localedir=None, autoupdate=True):
     if picard_args.long_version:
         return longversion()
 
+    if not (IS_WIN or IS_MACOS or IS_HAIKU):
+        dbus = QDBusConnection.sessionBus()
+        dbus.registerService(PICARD_APP_ID)
+
     tagger = Tagger(picard_args, unparsed_args, localedir, autoupdate)
+
+    # Initialize Qt default translations
+    translator = QtCore.QTranslator()
+    locale = QtCore.QLocale()
+    translation_path = QtCore.QLibraryInfo.location(QtCore.QLibraryInfo.TranslationsPath)
+    log.debug("Looking for Qt locale %s in %s", locale.name(), translation_path)
+    if translator.load(locale, "qtbase_", directory=translation_path):
+        tagger.installTranslator(translator)
+    else:
+        log.debug('Qt locale %s not available', locale.name())
+
     tagger.startTimer(1000)
     sys.exit(tagger.run())

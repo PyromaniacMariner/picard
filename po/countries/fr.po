@@ -1,18 +1,18 @@
 # Translators:
 # Translators:
-# French language coordinator <french.coordinator@rbox.me>, 2013
+# AO <ao@localizationlab.org>, 2013
 # Benjamin Sonntag <benjamin@octopuce.fr>, 2011-2012
 # Benjamin Sonntag <benjamin@sonntag.fr>, 2011-2012
 # Dibou <doc@boudon.nom.fr>, 2012
 # Laurent Monin <i18n@norz.org>, 2014
 # murdos <aurelien.mino@gmail.com>, 2011-2012
 # Paul Tremberth <agigaday@gmail.com>, 2013
-# French language coordinator <french.coordinator@rbox.me>, 2014-2015
+# AO <ao@localizationlab.org>, 2014-2015
 # yvanz, 2016
 msgid ""
 msgstr ""
 "Project-Id-Version: MusicBrainz\n"
-"PO-Revision-Date: 2016-10-19 10:11+0000\n"
+"PO-Revision-Date: 2017-09-23 18:13+0000\n"
 "Last-Translator: yvanz\n"
 "Language-Team: French (http://www.transifex.com/musicbrainz/musicbrainz/language/fr/)\n"
 "MIME-Version: 1.0\n"

@@ -17,24 +17,65 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 
+from collections import namedtuple
 import os.path
+import re
 import traceback
-from PyQt5 import QtGui, QtCore, QtWidgets
+
+from PyQt5 import (
+    QtCore,
+    QtGui,
+    QtWidgets,
+)
+
 from picard import log
-from picard.file import File
-from picard.track import Track
 from picard.album import Album
 from picard.coverart.image import CoverArtImageIOError
-from picard.util import (format_time, encode_filename,
-                         bytes2human, webbrowser2,
-                         union_sorted_lists, htmlescape)
+from picard.file import File
+from picard.track import Track
+from picard.util import (
+    bytes2human,
+    encode_filename,
+    format_time,
+    htmlescape,
+    union_sorted_lists,
+)
+
 from picard.ui import PicardDialog
 from picard.ui.ui_infodialog import Ui_InfoDialog
+from picard.ui.util import StandardButton
+
+
+class ArtworkCoverWidget(QtWidgets.QWidget):
+    """A QWidget that can be added to artwork column cell of ArtworkTable."""
+
+    SIZE = 170
+
+    def __init__(self, pixmap=None, text=None, parent=None):
+        super().__init__(parent=parent)
+        layout = QtWidgets.QVBoxLayout()
+
+        if pixmap is not None:
+            image_label = QtWidgets.QLabel()
+            image_label.setPixmap(pixmap.scaled(self.SIZE, self.SIZE,
+                                                QtCore.Qt.KeepAspectRatio,
+                                                QtCore.Qt.SmoothTransformation))
+            image_label.setAlignment(QtCore.Qt.AlignCenter)
+            layout.addWidget(image_label)
+
+        if text is not None:
+            text_label = QtWidgets.QLabel()
+            text_label.setText(text)
+            text_label.setAlignment(QtCore.Qt.AlignCenter)
+            text_label.setWordWrap(True)
+            layout.addWidget(text_label)
+
+        self.setLayout(layout)
 
 
 class ArtworkTable(QtWidgets.QTableWidget):
     def __init__(self, display_existing_art):
-        QtWidgets.QTableWidget.__init__(self, 0, 2)
+        super().__init__(0, 2)
         self.display_existing_art = display_existing_art
         h_header = self.horizontalHeader()
         v_header = self.verticalHeader()
@@ -46,74 +87,35 @@ class ArtworkTable(QtWidgets.QTableWidget):
             self._new_cover_col = 2
             self.insertColumn(2)
             self.setHorizontalHeaderLabels([_("Existing Cover"), _("Type"),
-                _("New Cover")])
-            self.arrow_pixmap = QtGui.QPixmap(":/images/arrow.png")
+                                            _("New Cover")])
         else:
             self._type_col = 0
             self._new_cover_col = 1
             self.setHorizontalHeaderLabels([_("Type"), _("Cover")])
             self.setColumnWidth(self._type_col, 140)
 
-    def get_coverart_widget(self, pixmap, text):
-        """Return a QWidget that can be added to artwork column cell of ArtworkTable."""
-        coverart_widget = QtWidgets.QWidget()
-        image_label = QtWidgets.QLabel()
-        text_label = QtWidgets.QLabel()
-        layout = QtWidgets.QVBoxLayout()
-        image_label.setPixmap(pixmap.scaled(170, 170, QtCore.Qt.KeepAspectRatio,
-                                            QtCore.Qt.SmoothTransformation))
-        image_label.setAlignment(QtCore.Qt.AlignCenter)
-        text_label.setText(text)
-        text_label.setAlignment(QtCore.Qt.AlignCenter)
-        text_label.setWordWrap(True)
-        layout.addWidget(image_label)
-        layout.addWidget(text_label)
-        coverart_widget.setLayout(layout)
-        return coverart_widget
-
-    def get_type_widget(self, type_text):
-        """Return a QWidget that can be added to type column cell of ArtworkTable.
-        If both existing and new artwork are to be displayed, insert an arrow icon to make comparison
-        obvious.
-        """
-        type_widget = QtWidgets.QWidget()
-        type_label = QtWidgets.QLabel()
-        layout = QtWidgets.QVBoxLayout()
-        type_label.setText(type_text)
-        type_label.setAlignment(QtCore.Qt.AlignCenter)
-        type_label.setWordWrap(True)
-        if self.display_existing_art:
-            arrow_label = QtWidgets.QLabel()
-            arrow_label.setPixmap(self.arrow_pixmap.scaled(170, 170, QtCore.Qt.KeepAspectRatio,
-                                                           QtCore.Qt.SmoothTransformation))
-            arrow_label.setAlignment(QtCore.Qt.AlignCenter)
-            layout.addWidget(arrow_label)
-            layout.addWidget(type_label)
-        else:
-            layout.addWidget(type_label)
-        type_widget.setLayout(layout)
-        return type_widget
-
 
 class InfoDialog(PicardDialog):
 
+    autorestore = False
+
     def __init__(self, obj, parent=None):
-        PicardDialog.__init__(self, parent)
+        super().__init__(parent)
         self.obj = obj
         self.images = []
         self.existing_images = []
         self.ui = Ui_InfoDialog()
         self.display_existing_artwork = False
 
-        if (isinstance(obj, File) and
-                isinstance(obj.parent, Track) or
-                isinstance(obj, Track) or
-                (isinstance(obj, Album) and obj.get_num_total_files() > 0)):
+        if (isinstance(obj, File)
+                and isinstance(obj.parent, Track)
+                or isinstance(obj, Track)
+                or (isinstance(obj, Album) and obj.get_num_total_files() > 0)):
             # Display existing artwork only if selected object is track object
             # or linked to a track object or it's an album with files
-            if (getattr(obj, 'orig_metadata', None) is not None and
-                    obj.orig_metadata.images and
-                    obj.orig_metadata.images != obj.metadata.images):
+            if (getattr(obj, 'orig_metadata', None) is not None
+                    and obj.orig_metadata.images
+                    and obj.orig_metadata.images != obj.metadata.images):
                 self.display_existing_artwork = True
                 self.existing_images = obj.orig_metadata.images
 
@@ -124,21 +126,21 @@ class InfoDialog(PicardDialog):
             self.existing_images = []
             self.display_existing_artwork = False
         self.ui.setupUi(self)
+        self.ui.buttonBox.addButton(
+            StandardButton(StandardButton.CLOSE), QtWidgets.QDialogButtonBox.AcceptRole)
         self.ui.buttonBox.accepted.connect(self.accept)
-        self.ui.buttonBox.rejected.connect(self.reject)
 
         # Add the ArtworkTable to the ui
         self.ui.artwork_table = ArtworkTable(self.display_existing_artwork)
         self.ui.artwork_table.setObjectName("artwork_table")
         self.ui.vboxlayout1.addWidget(self.ui.artwork_table)
-        if self.display_existing_artwork:
-            self.resize(665, 436)
         self.setTabOrder(self.ui.tabWidget, self.ui.artwork_table)
         self.setTabOrder(self.ui.artwork_table, self.ui.buttonBox)
 
         self.setWindowTitle(_("Info"))
         self.artwork_table = self.ui.artwork_table
         self._display_tabs()
+        self.restore_geometry()
 
     def _display_tabs(self):
         self._display_info_tab()
@@ -192,7 +194,7 @@ class InfoDialog(PicardDialog):
                 infos.append("%d x %d" % (image.width, image.height))
             infos.append(image.mimetype)
 
-            img_wgt = self.artwork_table.get_coverart_widget(pixmap, "\n".join(infos))
+            img_wgt = ArtworkCoverWidget(pixmap=pixmap, text="\n".join(infos))
             self.artwork_table.setCellWidget(row, col, img_wgt)
             self.artwork_table.setItem(row, col, item)
             row += 1
@@ -206,11 +208,14 @@ class InfoDialog(PicardDialog):
             existing_types = [image.types_as_string() for image in self.existing_images]
             # Merge both types and existing types list in sorted order.
             types = union_sorted_lists(types, existing_types)
+            pixmap_arrow = QtGui.QPixmap(":/images/arrow.png")
+        else:
+            pixmap_arrow = None
         for row, artwork_type in enumerate(types):
             self.artwork_table.insertRow(row)
-            type_wgt = self.artwork_table.get_type_widget(artwork_type)
             item = QtWidgets.QTableWidgetItem()
             item.setData(QtCore.Qt.UserRole, artwork_type)
+            type_wgt = ArtworkCoverWidget(pixmap=pixmap_arrow, text=artwork_type)
             self.artwork_table.setCellWidget(row, self.artwork_table._type_col, type_wgt)
             self.artwork_table.setItem(row, self.artwork_table._type_col, item)
 
@@ -222,6 +227,7 @@ class InfoDialog(PicardDialog):
         if self.existing_images:
             self._display_artwork(self.existing_images, self.artwork_table._existing_cover_col)
         self.artwork_table.itemDoubleClicked.connect(self.show_item)
+        self.artwork_table.verticalHeader().resizeSections(QtWidgets.QHeaderView.ResizeToContents)
 
     def tab_hide(self, widget):
         tab = self.ui.tabWidget
@@ -235,58 +241,57 @@ class InfoDialog(PicardDialog):
             return
         filename = data.tempfile_filename
         if filename:
-            webbrowser2.open("file://" + filename)
+            url = QtCore.QUrl.fromLocalFile(filename)
+            QtGui.QDesktopServices.openUrl(url)
+
+
+def format_file_info(file_):
+    info = []
+    info.append((_('Filename:'), file_.filename))
+    if '~format' in file_.orig_metadata:
+        info.append((_('Format:'), file_.orig_metadata['~format']))
+    try:
+        size = os.path.getsize(encode_filename(file_.filename))
+        sizestr = "%s (%s)" % (bytes2human.decimal(size), bytes2human.binary(size))
+        info.append((_('Size:'), sizestr))
+    except BaseException:
+        pass
+    if file_.orig_metadata.length:
+        info.append((_('Length:'), format_time(file_.orig_metadata.length)))
+    if '~bitrate' in file_.orig_metadata:
+        info.append((_('Bitrate:'), '%s kbps' % file_.orig_metadata['~bitrate']))
+    if '~sample_rate' in file_.orig_metadata:
+        info.append((_('Sample rate:'), '%s Hz' % file_.orig_metadata['~sample_rate']))
+    if '~bits_per_sample' in file_.orig_metadata:
+        info.append((_('Bits per sample:'), str(file_.orig_metadata['~bits_per_sample'])))
+    if '~channels' in file_.orig_metadata:
+        ch = file_.orig_metadata['~channels']
+        if ch == '1':
+            ch = _('Mono')
+        elif ch == '2':
+            ch = _('Stereo')
+        info.append((_('Channels:'), ch))
+    return '<br/>'.join(map(lambda i: '<b>%s</b> %s' %
+                            (htmlescape(i[0]),
+                             htmlescape(i[1])), info))
 
 
 class FileInfoDialog(InfoDialog):
 
-    def __init__(self, file, parent=None):
-        InfoDialog.__init__(self, file, parent)
-        self.setWindowTitle(_("Info") + " - " + file.base_filename)
-
-    @staticmethod
-    def format_file_info(file):
-        info = []
-        info.append((_('Filename:'), file.filename))
-        if '~format' in file.orig_metadata:
-            info.append((_('Format:'), file.orig_metadata['~format']))
-        try:
-            size = os.path.getsize(encode_filename(file.filename))
-            sizestr = "%s (%s)" % (bytes2human.decimal(size), bytes2human.binary(size))
-            info.append((_('Size:'), sizestr))
-        except:
-            pass
-        if file.orig_metadata.length:
-            info.append((_('Length:'), format_time(file.orig_metadata.length)))
-        if '~bitrate' in file.orig_metadata:
-            info.append((_('Bitrate:'), '%s kbps' % file.orig_metadata['~bitrate']))
-        if '~sample_rate' in file.orig_metadata:
-            info.append((_('Sample rate:'), '%s Hz' % file.orig_metadata['~sample_rate']))
-        if '~bits_per_sample' in file.orig_metadata:
-            info.append((_('Bits per sample:'), string_(file.orig_metadata['~bits_per_sample'])))
-        if '~channels' in file.orig_metadata:
-            ch = file.orig_metadata['~channels']
-            if ch == 1:
-                ch = _('Mono')
-            elif ch == 2:
-                ch = _('Stereo')
-            else:
-                ch = string_(ch)
-            info.append((_('Channels:'), ch))
-        return '<br/>'.join(map(lambda i: '<b>%s</b><br/>%s' %
-                                (htmlescape(i[0]),
-                                 htmlescape(i[1])), info))
+    def __init__(self, file_, parent=None):
+        super().__init__(file_, parent)
+        self.setWindowTitle(_("Info") + " - " + file_.base_filename)
 
     def _display_info_tab(self):
-        file = self.obj
-        text = FileInfoDialog.format_file_info(file)
+        file_ = self.obj
+        text = format_file_info(file_)
         self.ui.info.setText(text)
 
 
 class AlbumInfoDialog(InfoDialog):
 
     def __init__(self, album, parent=None):
-        InfoDialog.__init__(self, album, parent)
+        super().__init__(album, parent)
         self.setWindowTitle(_("Album Info"))
 
     def _display_info_tab(self):
@@ -297,7 +302,7 @@ class AlbumInfoDialog(InfoDialog):
         if album.errors:
             tabWidget.setTabText(tab_index, _("&Errors"))
             text = '<br />'.join(map(lambda s: '<font color="darkred">%s</font>' %
-                                     '<br />'.join(htmlescape(s)
+                                     '<br />'.join(htmlescape(str(s))
                                                    .replace('\t', ' ')
                                                    .replace(' ', '&nbsp;')
                                                    .splitlines()
@@ -309,10 +314,10 @@ class AlbumInfoDialog(InfoDialog):
             self.tab_hide(tab)
 
 
-class TrackInfoDialog(FileInfoDialog):
+class TrackInfoDialog(InfoDialog):
 
     def __init__(self, track, parent=None):
-        InfoDialog.__init__(self, track, parent)
+        super().__init__(track, parent)
         self.setWindowTitle(_("Track Info"))
 
     def _display_info_tab(self):
@@ -327,8 +332,8 @@ class TrackInfoDialog(FileInfoDialog):
 
         tabWidget.setTabText(tab_index, _("&Info"))
         text = ngettext("%i file in this track", "%i files in this track",
-                         track.num_linked_files) % track.num_linked_files
-        info_files = [FileInfoDialog.format_file_info(file) for file in track.linked_files]
+                        track.num_linked_files) % track.num_linked_files
+        info_files = [format_file_info(file_) for file_ in track.linked_files]
         text += '<hr />' + '<hr />'.join(info_files)
         self.ui.info.setText(text)
 
@@ -336,7 +341,7 @@ class TrackInfoDialog(FileInfoDialog):
 class ClusterInfoDialog(InfoDialog):
 
     def __init__(self, cluster, parent=None):
-        InfoDialog.__init__(self, cluster, parent)
+        super().__init__(cluster, parent)
         self.setWindowTitle(_("Cluster Info"))
 
     def _display_info_tab(self):
@@ -351,13 +356,26 @@ class ClusterInfoDialog(InfoDialog):
         info.append("<b>%s</b> %s" % (_('Artist:'),
                                       htmlescape(cluster.metadata["albumartist"])))
         info.append("")
-        lines = []
-        for file in cluster.iterfiles(False):
-            m = file.metadata
+        TrackListItem = namedtuple('TrackListItem', 'tracknumber, title, artist, length')
+        tracklist = []
+        for file_ in cluster.iterfiles(False):
+            m = file_.metadata
             artist = m["artist"] or m["albumartist"] or cluster.metadata["albumartist"]
-            lines.append(m["tracknumber"] + " " +
-                         m["title"] + " - " + artist + " (" +
-                         m["~length"] + ")")
+            tracklist.append(TrackListItem(m["tracknumber"], m["title"], artist,
+                                           m["~length"]))
+
+        def sorttracknum(item):
+            try:
+                return int(item.tracknumber)
+            except ValueError:
+                try:
+                    # This allows to parse values like '3' but also '3/10'
+                    m = re.search(r'^\d+', item.tracknumber)
+                    return int(m.group(0))
+                except AttributeError:
+                    return 0
+
+        lines = ["%s %s - %s (%s)" % item for item in sorted(tracklist, key=sorttracknum)]
         info.append("<b>%s</b><br />%s" % (_('Tracklist:'),
                     '<br />'.join([htmlescape(s).replace(' ', '&nbsp;') for s in lines])))
         self.ui.info.setText('<br/>'.join(info))

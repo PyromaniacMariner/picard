@@ -17,27 +17,42 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 
-import os
 from functools import partial
-from PyQt5 import QtCore, QtGui, QtNetwork, QtWidgets
-from picard import config, log
+import os
+import re
+
+from PyQt5 import (
+    QtCore,
+    QtGui,
+    QtNetwork,
+    QtWidgets,
+)
+
+from picard import (
+    config,
+    log,
+)
 from picard.album import Album
-from picard.coverart.image import CoverArtImage, CoverArtImageError
-from picard.track import Track
+from picard.cluster import Cluster
+from picard.const import MAX_COVERS_TO_STACK
+from picard.coverart.image import (
+    CoverArtImage,
+    CoverArtImageError,
+)
 from picard.file import File
+from picard.track import Track
 from picard.util import imageinfo
 from picard.util.lrucache import LRUCache
-from picard.const import MAX_COVERS_TO_STACK
 
 
 class ActiveLabel(QtWidgets.QLabel):
     """Clickable QLabel."""
 
     clicked = QtCore.pyqtSignal()
-    image_dropped = QtCore.pyqtSignal(QtCore.QUrl, QtCore.QByteArray)
+    image_dropped = QtCore.pyqtSignal(QtCore.QUrl, bytes)
 
     def __init__(self, active=True, drops=False, *args):
-        QtWidgets.QLabel.__init__(self, *args)
+        super().__init__(*args)
         self.setMargin(0)
         self.setActive(active)
         self.setAcceptDrops(drops)
@@ -53,7 +68,12 @@ class ActiveLabel(QtWidgets.QLabel):
         if self.active and event.button() == QtCore.Qt.LeftButton:
             self.clicked.emit()
 
-    def dragEnterEvent(self, event):
+    @staticmethod
+    def dragEnterEvent(event):
+        event.acceptProposedAction()
+
+    @staticmethod
+    def dragMoveEvent(event):
         event.acceptProposedAction()
 
     def dropEvent(self, event):
@@ -62,23 +82,21 @@ class ActiveLabel(QtWidgets.QLabel):
         # is useful for Google Images, where the url links to the page that contains the image
         # so we use it if the downloaded url is not an image.
         mime_data = event.mimeData()
-        dropped_data = mime_data.data('application/octet-stream')
+        dropped_data = bytes(mime_data.data('application/octet-stream'))
 
         if not dropped_data:
-            dropped_data = mime_data.data('application/x-qt-image')
+            dropped_data = bytes(mime_data.data('application/x-qt-image'))
 
-        try:
-            mime = imageinfo.identify(dropped_data)[2]
-            if mime in ('image/jpeg', 'image/png'):
-                accepted = True
-                self.image_dropped.emit(QtCore.QUrl(''), dropped_data)
-        except imageinfo.IdentificationError:
-            pass
+        if not dropped_data:
+            # Maybe we can get something useful from a dropped HTML snippet.
+            dropped_data = bytes(mime_data.data('text/html'))
 
         if not accepted:
-            for url in event.mimeData().urls():
+            for url in mime_data.urls():
                 if url.scheme() in ('https', 'http', 'file'):
                     accepted = True
+                    log.debug("Dropped %s url (with %d bytes of data)",
+                              url.toString(), len(dropped_data or ''))
                     self.image_dropped.emit(url, dropped_data)
 
         if not accepted:
@@ -86,9 +104,11 @@ class ActiveLabel(QtWidgets.QLabel):
                 image_bytes = QtCore.QByteArray()
                 image_buffer = QtCore.QBuffer(image_bytes)
                 mime_data.imageData().save(image_buffer, 'JPEG')
+                dropped_data = bytes(image_bytes)
 
                 accepted = True
-                self.image_dropped.emit(QtCore.QUrl(''), image_bytes)
+                log.debug("Dropped %d bytes of Qt image data", len(dropped_data))
+                self.image_dropped.emit(QtCore.QUrl(''), dropped_data)
 
         if accepted:
             event.acceptProposedAction()
@@ -97,7 +117,7 @@ class ActiveLabel(QtWidgets.QLabel):
 class CoverArtThumbnail(ActiveLabel):
 
     def __init__(self, active=False, drops=False, pixmap_cache=None, *args, **kwargs):
-        super(CoverArtThumbnail, self).__init__(active, drops, *args, **kwargs)
+        super().__init__(active, drops, *args, **kwargs)
         self.data = None
         self.has_common_images = None
         self.shadow = QtGui.QPixmap(":/images/CoverArtShadow.png")
@@ -260,17 +280,21 @@ class CoverArtThumbnail(ActiveLabel):
 
 
 def set_image_replace(obj, coverartimage):
-    obj.metadata.set_front_image(coverartimage)
+    obj.metadata.images.strip_front_images()
+    obj.metadata.images.append(coverartimage)
 
 
 def set_image_append(obj, coverartimage):
-    obj.metadata.append_image(coverartimage)
+    obj.metadata.images.append(coverartimage)
+
+
+HTML_IMG_SRC_REGEX = re.compile(r'<img .*?src="(.*?)"', re.UNICODE)
 
 
 class CoverArtBox(QtWidgets.QGroupBox):
 
     def __init__(self, parent):
-        QtWidgets.QGroupBox.__init__(self, "")
+        super().__init__("")
         self.layout = QtWidgets.QVBoxLayout()
         self.layout.setSpacing(6)
         self.parent = parent
@@ -329,7 +353,7 @@ class CoverArtBox(QtWidgets.QGroupBox):
 
     def show(self):
         self.update_display(True)
-        super(CoverArtBox, self).show()
+        super().show()
 
     def set_metadata(self, metadata, orig_metadata, item):
         if not metadata or not metadata.images:
@@ -344,21 +368,24 @@ class CoverArtBox(QtWidgets.QGroupBox):
         if self.item is None:
             return
 
-        if fallback_data is not None:
+        if fallback_data:
             self.load_remote_image(url, None, fallback_data)
 
         if url.scheme() in ('http', 'https'):
-            path = url.path(QtCore.QUrl.FullyEncoded)
+            path = url.path()
             if url.hasQuery():
-                path += '?' + url.query(QtCore.QUrl.FullyEncoded)
+                query = QtCore.QUrlQuery(url.query())
+                queryargs = dict(query.queryItems())
+            else:
+                queryargs = {}
             if url.scheme() == 'https':
                 port = 443
             else:
                 port = 80
-            self.tagger.webservice.get(string_(url.encodedHost()), url.port(port), string_(path),
-                                  partial(self.on_remote_image_fetched, url, fallback_data=fallback_data),
-                                  parse_response_type=None,
-                                  priority=True, important=True)
+            self.tagger.webservice.get(url.host(), url.port(port), path,
+                                       partial(self.on_remote_image_fetched, url, fallback_data=fallback_data),
+                                       parse_response_type=None, queryargs=queryargs,
+                                       priority=True, important=True)
         elif url.scheme() == 'file':
             path = os.path.normpath(os.path.realpath(url.toLocalFile().rstrip("\0")))
             if path and os.path.exists(path):
@@ -368,24 +395,57 @@ class CoverArtBox(QtWidgets.QGroupBox):
                 self.load_remote_image(url, mime, data)
 
     def on_remote_image_fetched(self, url, data, reply, error, fallback_data=None):
+        if error:
+            log.error("Failed loading remote image from %s: %s", url, reply.errorString())
+            if fallback_data:
+                self._load_fallback_data(url, fallback_data)
+            return
+
+        data = bytes(data)
         mime = reply.header(QtNetwork.QNetworkRequest.ContentTypeHeader)
+        # Some sites return a mime type with encoding like "image/jpeg; charset=UTF-8"
+        mime = mime.split(';')[0]
+        url_query = QtCore.QUrlQuery(url.query())
+        # If mime indicates only binary data we can try to guess the real mime type
+        if mime in ('application/octet-stream', 'binary/data'):
+            mime = imageinfo.identify(data)[2]
         if mime in ('image/jpeg', 'image/png'):
             self.load_remote_image(url, mime, data)
-        elif url.hasQueryItem("imgurl"):
+        elif url_query.hasQueryItem("imgurl"):
             # This may be a google images result, try to get the URL which is encoded in the query
-            url = QtCore.QUrl(url.queryItemValue("imgurl"))
+            url = QtCore.QUrl(url_query.queryItemValue("imgurl", QtCore.QUrl.FullyDecoded))
+            self.fetch_remote_image(url)
+        elif url_query.hasQueryItem("mediaurl"):
+            # Bing uses mediaurl
+            url = QtCore.QUrl(url_query.queryItemValue("mediaurl", QtCore.QUrl.FullyDecoded))
             self.fetch_remote_image(url)
         else:
             log.warning("Can't load remote image with MIME-Type %s", mime)
             if fallback_data:
-                # Tests for image format obtained from file-magic
-                try:
-                    mime = imageinfo.identify(fallback_data)[2]
-                except imageinfo.IdentificationError as e:
-                    log.error("Unable to identify dropped data format: %s" % e)
-                else:
-                    log.debug("Trying the dropped %s data", mime)
-                    self.load_remote_image(url, mime, fallback_data)
+                self._load_fallback_data(url, fallback_data)
+
+    def _load_fallback_data(self, url, data):
+        # Tests for image format obtained from file-magic
+        try:
+            mime = imageinfo.identify(data)[2]
+        except imageinfo.IdentificationError as e:
+            log.warning("Unable to identify dropped data format: %s" % e)
+        else:
+            log.debug("Trying the dropped %s data", mime)
+            self.load_remote_image(url, mime, data)
+            return
+
+        # Try getting image out of HTML (e.g. for Goole image search detail view)
+        try:
+            html = data.decode()
+            match = re.search(HTML_IMG_SRC_REGEX, html)
+            if match:
+                url = QtCore.QUrl(match.group(1))
+        except UnicodeDecodeError as e:
+            log.warning("Unable to decode dropped data format: %s" % e)
+        else:
+            log.debug("Trying URL parsed from HTML: %s", url.toString())
+            self.fetch_remote_image(url)
 
     def load_remote_image(self, url, mime, data):
         try:
@@ -400,9 +460,12 @@ class CoverArtBox(QtWidgets.QGroupBox):
 
         if config.setting["load_image_behavior"] == 'replace':
             set_image = set_image_replace
+            debug_info = "Replacing with dropped %r in %r"
         else:
             set_image = set_image_append
+            debug_info = "Appending dropped %r to %r"
 
+        update = True
         if isinstance(self.item, Album):
             album = self.item
             album.enable_update_metadata_images(False)
@@ -417,6 +480,17 @@ class CoverArtBox(QtWidgets.QGroupBox):
             album.enable_update_metadata_images(True)
             album.update_metadata_images()
             album.update(False)
+        elif isinstance(self.item, Cluster):
+            cluster = self.item
+            cluster.enable_update_metadata_images(False)
+            set_image(cluster, coverartimage)
+            for file in cluster.iterfiles():
+                set_image(file, coverartimage)
+                file.metadata_images_changed.emit()
+                file.update()
+            cluster.enable_update_metadata_images(True)
+            cluster.update_metadata_images()
+            cluster.update()
         elif isinstance(self.item, Track):
             track = self.item
             track.album.enable_update_metadata_images(False)
@@ -434,8 +508,15 @@ class CoverArtBox(QtWidgets.QGroupBox):
             set_image(file, coverartimage)
             file.metadata_images_changed.emit()
             file.update()
-        self.cover_art.set_metadata(self.item.metadata)
-        self.show()
+        else:
+            debug_info = "Dropping %r to %r is not handled"
+            update = False
+
+        log.debug(debug_info, coverartimage, self.item)
+
+        if update:
+            self.cover_art.set_metadata(self.item.metadata)
+            self.show()
 
     def set_load_image_behavior(self, behavior):
         config.setting["load_image_behavior"] = behavior

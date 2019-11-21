@@ -4,16 +4,20 @@
 # Daniel Schury <Daniel.Schury@physik.uni-giessen.de>, 2011
 # Ettore Atalan <atalanttore@googlemail.com>, 2014
 # lorenzpressler <lorenz.pressler@gmail.com>, 2012
+# lorenzpressler <lorenz.pressler@gmail.com>, 2012
 # Wieland Hoffmann <themineo+transifex@googlemail.com>, 2011
+# nikki, 2013-2014
 # Nikolai Prokoschenko <nikolai@prokoschenko.de>, 2011
 # nikki, 2013
 # S.Brandt <s.brandt@mixxx.org>, 2015
 # Shepard, 2011
+# Shepard, 2011
 # Tobias Quathamer <toddy@debian.org>, 2007
+# Wieland Hoffmann <themineo+transifex@googlemail.com>, 2011
 msgid ""
 msgstr ""
 "Project-Id-Version: MusicBrainz\n"
-"PO-Revision-Date: 2015-03-27 11:34+0000\n"
+"PO-Revision-Date: 2017-09-19 12:54+0000\n"
 "Last-Translator: S.Brandt <s.brandt@mixxx.org>\n"
 "Language-Team: German (http://www.transifex.com/musicbrainz/musicbrainz/language/de/)\n"
 "MIME-Version: 1.0\n"

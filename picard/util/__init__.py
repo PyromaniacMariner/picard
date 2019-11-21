@@ -17,22 +17,31 @@
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
-import cgi
+import builtins
+from collections import namedtuple
+import html
 import json
-import os
 import ntpath
+from operator import attrgetter
+import os
 import re
 import sys
-import unicodedata
-import builtins
-if sys.platform == 'win32':
-    from ctypes import windll
-
 from time import time
+import unicodedata
+
 from PyQt5 import QtCore
-from string import Template
+
 # Required for compatibility with lastfmplus which imports this from here rather than loading it direct.
 from picard.const import MUSICBRAINZ_SERVERS
+from picard.const.sys import (
+    FROZEN_TEMP_PATH,
+    IS_FROZEN,
+    IS_WIN,
+)
+
+
+if IS_WIN:
+    from ctypes import windll
 
 
 class LockableObject(QtCore.QObject):
@@ -40,7 +49,7 @@ class LockableObject(QtCore.QObject):
     """Read/write lockable object."""
 
     def __init__(self):
-        QtCore.QObject.__init__(self)
+        super().__init__()
         self.__lock = QtCore.QReadWriteLock()
 
     def lock_for_read(self):
@@ -103,13 +112,19 @@ def pathcmp(a, b):
     return os.path.normcase(a) == os.path.normcase(b)
 
 
-def format_time(ms):
+def format_time(ms, display_zero=False):
     """Formats time in milliseconds to a string representation."""
     ms = float(ms)
-    if ms == 0:
+    if ms == 0 and not display_zero:
         return "?:??"
+    duration_seconds = round(ms / 1000)
+    if duration_seconds < 3600:
+        minutes, seconds = divmod(duration_seconds, 60)
+        return "%d:%02d" % (minutes, seconds)
     else:
-        return "%d:%02d" % (round(ms / 1000.0) / 60, round(ms / 1000.0) % 60)
+        hours, remainder = divmod(duration_seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        return "%d:%02d:%02d" % (hours, minutes, seconds)
 
 
 def sanitize_date(datestr):
@@ -131,11 +146,11 @@ def sanitize_date(datestr):
 
 
 _re_win32_incompat = re.compile(r'["*:<>?|]', re.UNICODE)
-def replace_win32_incompat(string, repl="_"):
+def replace_win32_incompat(string, repl="_"):  # noqa: E302
     """Replace win32 filename incompatible characters from ``string`` by
        ``repl``."""
     # Don't replace : with _ for windows drive
-    if sys.platform == "win32" and os.path.isabs(string):
+    if IS_WIN and os.path.isabs(string):
         drive, rest = ntpath.splitdrive(string)
         return drive + _re_win32_incompat.sub(repl, rest)
     else:
@@ -143,13 +158,13 @@ def replace_win32_incompat(string, repl="_"):
 
 
 _re_non_alphanum = re.compile(r'\W+', re.UNICODE)
-def strip_non_alnum(string):
+def strip_non_alnum(string):  # noqa: E302
     """Remove all non-alphanumeric characters from ``string``."""
     return _re_non_alphanum.sub(" ", string).strip()
 
 
 _re_slashes = re.compile(r'[\\/]', re.UNICODE)
-def sanitize_filename(string, repl="_"):
+def sanitize_filename(string, repl="_"):  # noqa: E302
     return _re_slashes.sub(repl, string)
 
 
@@ -193,10 +208,13 @@ def find_existing_path(path):
 
 
 def find_executable(*executables):
-    if sys.platform == 'win32':
+    if IS_WIN:
         executables = [e + '.exe' for e in executables]
     paths = [os.path.dirname(sys.executable)] if sys.executable else []
     paths += os.environ.get('PATH', '').split(os.pathsep)
+    # This is for searching for executables bundled in packaged builds
+    if IS_FROZEN:
+        paths += [FROZEN_TEMP_PATH]
     for path in paths:
         for executable in executables:
             f = os.path.join(path, executable)
@@ -204,10 +222,12 @@ def find_executable(*executables):
                 return f
 
 
-_mbid_format = Template('$h{8}-$h$l-$h$l-$h$l-$h{12}').safe_substitute(h='[0-9a-fA-F]', l='{4}')
-_re_mbid_val = re.compile(_mbid_format)
-def mbid_validate(string):
-    return _re_mbid_val.match(string)
+_mbid_format = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+_re_mbid_val = re.compile(_mbid_format, re.IGNORECASE)
+def mbid_validate(string):  # noqa: E302
+    """Test if passed string is a valid mbid
+    """
+    return _re_mbid_val.match(string) is not None
 
 
 def parse_amazon_url(url):
@@ -298,14 +318,14 @@ def tracknum_from_filename(base_filename):
     # 4-digit or more numbers are very unlikely to be a track number
     # smaller number is preferred in any case
     numbers = sorted([int(n) for n in re.findall(r'\d+', filename) if
-                      int(n) <= 99 and int(n) > 0])
+                      0 < int(n) <= 99])
     if numbers:
         return numbers[0]
     return -1
 
 
 # Provide os.path.samefile equivalent which is missing in Python under Windows
-if sys.platform == 'win32':
+if IS_WIN:
     def os_path_samefile(p1, p2):
         ap1 = os.path.abspath(p1)
         ap2 = os.path.abspath(p2)
@@ -320,12 +340,12 @@ def is_hidden(filepath):
     on non-Windows systems or if it has the "hidden" flag
     set on Windows."""
     name = os.path.basename(os.path.abspath(filepath))
-    return (name.startswith('.') and sys.platform != 'win32') \
+    return (not IS_WIN and name.startswith('.')) \
         or _has_hidden_attribute(filepath)
 
 
 def _has_hidden_attribute(filepath):
-    if sys.platform != 'win32':
+    if not IS_WIN:
         return False
     # FIXME: On OSX detecting hidden files involves more
     # than just checking for dot files, see
@@ -365,7 +385,7 @@ def album_artist_from_path(filename, album, artist):
     """If album is not set, try to extract album and artist from path
     """
     if not album:
-        dirs = os.path.dirname(filename).replace('\\','/').lstrip('/').split('/')
+        dirs = os.path.dirname(filename).replace('\\', '/').lstrip('/').split('/')
         if len(dirs) == 0:
             return album, artist
         # Strip disc subdirectory from list
@@ -396,7 +416,7 @@ def build_qurl(host, port=80, path=None, queryargs=None):
     url.setHost(host)
     url.setPort(port)
 
-    if (host in MUSICBRAINZ_SERVERS or port == 443):
+    if host in MUSICBRAINZ_SERVERS or port == 443:
         url.setScheme("https")
         url.setPort(443)
     else:
@@ -407,7 +427,7 @@ def build_qurl(host, port=80, path=None, queryargs=None):
     if queryargs is not None:
         url_query = QtCore.QUrlQuery()
         for k, v in queryargs.items():
-            url_query.addQueryItem(k, string_(v))
+            url_query.addQueryItem(k, str(v))
         url.setQuery(url_query)
     return url
 
@@ -442,7 +462,7 @@ def union_sorted_lists(list1, list2):
     return union
 
 
-def convert_to_string(obj):
+def __convert_to_string(obj):
     """Appropriately converts the input `obj` to a string.
 
     Args:
@@ -460,8 +480,17 @@ def convert_to_string(obj):
         return str(obj)
 
 
+def convert_to_string(obj):
+    from picard import log
+    log.warning("string_() and convert_to_string() are deprecated, do not use")
+    return __convert_to_string(obj)
+
+
+builtins.__dict__['string_'] = convert_to_string
+
+
 def htmlescape(string):
-    return cgi.escape(string)
+    return html.escape(string, quote=False)
 
 
 def load_json(data):
@@ -475,11 +504,127 @@ def load_json(data):
         dict: Response data as a python dict
 
     """
-    return json.loads(convert_to_string(data))
+    return json.loads(__convert_to_string(data))
 
 
 def parse_json(reply):
     return load_json(reply.readAll())
 
 
-builtins.__dict__['string_'] = convert_to_string
+def restore_method(func):
+    def func_wrapper(*args, **kwargs):
+        if not QtCore.QObject.tagger._no_restore:
+            return func(*args, **kwargs)
+    return func_wrapper
+
+
+def compare_version_tuples(version1, version2):
+    """Compare Versions
+
+    Compares two Picard version tuples to determine whether the second tuple
+    contains a higher version number than the first tuple.
+
+    Args:
+        version1: The first version tuple to compare.  This will be used as
+                  the base for the comparison.
+        version2: The version tuple to be compared to the base version.
+
+    Returns:
+        -1 if version2 is lower than version1
+        0 if version2 is the same as version1
+        1 if version2 is higher than version1
+
+    Raises:
+        none
+    """
+
+    # Create test copies that can be modified
+    test1 = list(version1)
+    test2 = list(version2)
+
+    # Set sort order for release type element
+    test1[3] = 1 if test1[3] == 'final' else 0
+    if test1[3]:
+        test1[4] = 0
+    test2[3] = 1 if test2[3] == 'final' else 0
+    if test2[3]:
+        test2[4] = 0
+
+    # Compare elements in order
+    for x in range(0, 5):
+        if test1[x] != test2[x]:
+            return 1 if test1[x] < test2[x] else -1
+    return 0
+
+
+def reconnect(signal, newhandler=None, oldhandler=None):
+    """
+    Reconnect an handler to a signal
+
+    It disconnects all previous handlers before connecting new one
+
+    Credits: https://stackoverflow.com/a/21589403
+    """
+    while True:
+        try:
+            if oldhandler is not None:
+                signal.disconnect(oldhandler)
+            else:
+                signal.disconnect()
+        except TypeError:
+            break
+    if newhandler is not None:
+        signal.connect(newhandler)
+
+
+def compare_barcodes(barcode1, barcode2):
+    """
+    Compares two barcodes. Returns True if they are the same, False otherwise.
+
+    Tries to normalize UPC barcodes to EAN barcodes so e.g. "727361379704"
+    and "0727361379704" are considered the same.
+    """
+    barcode1 = barcode1 or ''
+    barcode2 = barcode2 or ''
+    if barcode1 == barcode2:
+        return True
+    if not barcode1 or not barcode2:
+        return False
+    return barcode1.zfill(13) == barcode2.zfill(13)
+
+
+BestMatch = namedtuple('BestMatch', 'similarity result num_results')
+
+
+def sort_by_similarity(candidates):
+    return sorted(
+        candidates(),
+        reverse=True,
+        key=attrgetter('similarity')
+    )
+
+
+def find_best_match(candidates, no_match):
+    sorted_results = sort_by_similarity(candidates)
+    if sorted_results:
+        result = sorted_results[0]
+    else:
+        result = no_match
+    return BestMatch(similarity=result.similarity, result=result, num_results=len(sorted_results))
+
+
+def get_qt_enum(cls, enum):
+    """
+    List all the names of attributes inside a Qt enum.
+
+    Example:
+        >>> from PyQt5.Qt import Qt
+        >>> print(get_qt_enum(Qt, Qt.CoordinateSystem))
+        ['DeviceCoordinates', 'LogicalCoordinates']
+    """
+    values = []
+    for key in dir(cls):
+        value = getattr(cls, key)
+        if isinstance(value, enum):
+            values.append(key)
+    return values

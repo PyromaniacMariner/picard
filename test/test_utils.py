@@ -1,26 +1,36 @@
 # -*- coding: utf-8 -*-
 
-import os.path
-import sys
-import unittest
-from picard import util
-
 import builtins
+from collections import namedtuple
+import os.path
+import unittest
+
+from test.picardtestcase import PicardTestCase
+
+from picard import util
+from picard.const.sys import IS_WIN
+from picard.util import (
+    find_best_match,
+    imageinfo,
+    sort_by_similarity,
+)
+
+
 # ensure _() is defined
 if '_' not in builtins.__dict__:
     builtins.__dict__['_'] = lambda a: a
 
 
-class ReplaceWin32IncompatTest(unittest.TestCase):
+class ReplaceWin32IncompatTest(PicardTestCase):
 
-    @unittest.skipUnless(sys.platform == "win32", "windows test")
+    @unittest.skipUnless(IS_WIN, "windows test")
     def test_correct_absolute_win32(self):
         self.assertEqual(util.replace_win32_incompat("c:\\test\\te\"st/2"),
                              "c:\\test\\te_st/2")
         self.assertEqual(util.replace_win32_incompat("c:\\test\\d:/2"),
                              "c:\\test\\d_/2")
 
-    @unittest.skipUnless(sys.platform != "win32", "non-windows test")
+    @unittest.skipUnless(not IS_WIN, "non-windows test")
     def test_correct_absolute_non_win32(self):
         self.assertEqual(util.replace_win32_incompat("/test/te\"st/2"),
                              "/test/te_st/2")
@@ -38,7 +48,7 @@ class ReplaceWin32IncompatTest(unittest.TestCase):
                              "c:\\test\\te\"st2")
 
 
-class SanitizeDateTest(unittest.TestCase):
+class SanitizeDateTest(PicardTestCase):
 
     def test_correct(self):
         self.assertEqual(util.sanitize_date("2006--"), "2006")
@@ -53,7 +63,7 @@ class SanitizeDateTest(unittest.TestCase):
         self.assertNotEqual(util.sanitize_date("2006.03.02"), "2006-03-02")
 
 
-class TranslateArtistTest(unittest.TestCase):
+class TranslateArtistTest(PicardTestCase):
 
     def test_latin(self):
         self.assertEqual(u"Jean Michel Jarre", util.translate_from_sortname(u"Jean Michel Jarre", u"Jarre, Jean Michel"))
@@ -75,25 +85,29 @@ class TranslateArtistTest(unittest.TestCase):
         self.assertNotEqual(u"Пётр Ильич Чайковский", util.translate_from_sortname(u"Пётр Ильич Чайковский", u"Tchaikovsky, Pyotr Ilyich"))
 
 
-class FormatTimeTest(unittest.TestCase):
+class FormatTimeTest(PicardTestCase):
 
     def test(self):
         self.assertEqual("?:??", util.format_time(0))
+        self.assertEqual("0:00", util.format_time(0, display_zero=True))
         self.assertEqual("3:00", util.format_time(179750))
         self.assertEqual("3:00", util.format_time(179500))
         self.assertEqual("2:59", util.format_time(179499))
+        self.assertEqual("59:59", util.format_time(3599499))
+        self.assertEqual("1:00:00", util.format_time(3599500))
+        self.assertEqual("1:02:59", util.format_time(3779499))
 
 
-class HiddenFileTest(unittest.TestCase):
+class HiddenFileTest(PicardTestCase):
 
-    @unittest.skipUnless(sys.platform != "win32", "non-windows test")
+    @unittest.skipUnless(not IS_WIN, "non-windows test")
     def test(self):
         self.assertTrue(util.is_hidden('/a/b/.c.mp3'))
         self.assertTrue(util.is_hidden('/a/.b/.c.mp3'))
         self.assertFalse(util.is_hidden('/a/.b/c.mp3'))
 
 
-class TagsTest(unittest.TestCase):
+class TagsTest(PicardTestCase):
 
     def test_display_tag_name(self):
         dtn = util.tags.display_tag_name
@@ -107,7 +121,7 @@ class TagsTest(unittest.TestCase):
         self.assertEqual(dtn(''), '')
 
 
-class LinearCombinationTest(unittest.TestCase):
+class LinearCombinationTest(PicardTestCase):
 
     def test_0(self):
         parts = []
@@ -150,7 +164,7 @@ class LinearCombinationTest(unittest.TestCase):
         self.assertRaises(TypeError, util.linear_combination_of_weights, parts)
 
 
-class AlbumArtistFromPathTest(unittest.TestCase):
+class AlbumArtistFromPathTest(PicardTestCase):
 
     def test_album_artist_from_path(self):
         aafp = util.album_artist_from_path
@@ -176,10 +190,7 @@ class AlbumArtistFromPathTest(unittest.TestCase):
         self.assertEqual(aafp(file_4, 'album', 'artist'), ('album', 'artist'))
 
 
-from picard.util import imageinfo
-
-
-class ImageInfoTest(unittest.TestCase):
+class ImageInfoTest(PicardTestCase):
 
     def test_gif(self):
         file = os.path.join('test', 'data', 'mb.gif')
@@ -225,3 +236,88 @@ class ImageInfoTest(unittest.TestCase):
                           imageinfo.identify, data)
         self.assertRaises(imageinfo.UnrecognizedFormat,
                           imageinfo.identify, data)
+
+
+class CompareBarcodesTest(unittest.TestCase):
+
+    def test_same(self):
+        self.assertTrue(util.compare_barcodes('0727361379704', '0727361379704'))
+        self.assertTrue(util.compare_barcodes('727361379704', '727361379704'))
+        self.assertTrue(util.compare_barcodes('727361379704', '0727361379704'))
+        self.assertTrue(util.compare_barcodes('0727361379704', '727361379704'))
+        self.assertTrue(util.compare_barcodes(None, None))
+        self.assertTrue(util.compare_barcodes('', ''))
+        self.assertTrue(util.compare_barcodes(None, ''))
+        self.assertTrue(util.compare_barcodes('', None))
+
+    def test_not_same(self):
+        self.assertFalse(util.compare_barcodes('0727361379704', '0727361379705'))
+        self.assertFalse(util.compare_barcodes('727361379704', '1727361379704'))
+        self.assertFalse(util.compare_barcodes('0727361379704', None))
+        self.assertFalse(util.compare_barcodes(None, '0727361379704'))
+
+
+class MbidValidateTest(unittest.TestCase):
+
+    def test_ok(self):
+        self.assertTrue(util.mbid_validate('2944824d-4c26-476f-a981-be849081942f'))
+        self.assertTrue(util.mbid_validate('2944824D-4C26-476F-A981-be849081942f'))
+        self.assertFalse(util.mbid_validate(''))
+        self.assertFalse(util.mbid_validate('Z944824d-4c26-476f-a981-be849081942f'))
+        self.assertFalse(util.mbid_validate('22944824d-4c26-476f-a981-be849081942f'))
+        self.assertFalse(util.mbid_validate('2944824d-4c26-476f-a981-be849081942ff'))
+        self.assertFalse(util.mbid_validate('2944824d-4c26.476f-a981-be849081942f'))
+
+    def test_not_ok(self):
+        self.assertRaises(TypeError, util.mbid_validate, 123)
+        self.assertRaises(TypeError, util.mbid_validate, None)
+
+
+SimMatchTest = namedtuple('SimMatchTest', 'similarity name')
+
+
+class SortBySimilarity(unittest.TestCase):
+
+    def setUp(self):
+        self.test_values = [
+            SimMatchTest(similarity=0.74, name='d'),
+            SimMatchTest(similarity=0.61, name='a'),
+            SimMatchTest(similarity=0.75, name='b'),
+            SimMatchTest(similarity=0.75, name='c'),
+        ]
+
+    def candidates(self):
+        for value in self.test_values:
+            yield value
+
+    def test_sort_by_similarity(self):
+        results = [result.name for result in sort_by_similarity(self.candidates)]
+        self.assertEqual(results, ['b', 'c', 'd', 'a'])
+
+    def test_findbestmatch(self):
+        no_match = SimMatchTest(similarity=-1, name='no_match')
+        best_match = find_best_match(self.candidates, no_match)
+
+        self.assertEqual(best_match.result.name, 'b')
+        self.assertEqual(best_match.similarity, 0.75)
+        self.assertEqual(best_match.num_results, 4)
+
+    def test_findbestmatch_nomatch(self):
+        self.test_values = []
+
+        no_match = SimMatchTest(similarity=-1, name='no_match')
+        best_match = find_best_match(self.candidates, no_match)
+
+        self.assertEqual(best_match.result.name, 'no_match')
+        self.assertEqual(best_match.similarity, -1)
+        self.assertEqual(best_match.num_results, 0)
+
+
+class GetQtEnum(unittest.TestCase):
+
+    def test_get_qt_enum(self):
+        from PyQt5.QtCore import QStandardPaths
+        values = util.get_qt_enum(QStandardPaths, QStandardPaths.LocateOption)
+        self.assertIn('LocateFile', values)
+        self.assertIn('LocateDirectory', values)
+        self.assertNotIn('DesktopLocation', values)

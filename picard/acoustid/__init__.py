@@ -19,22 +19,32 @@
 
 from collections import deque
 from functools import partial
+import json
+
 from PyQt5 import QtCore
-from picard import config, log
-from picard.const import FPCALC_NAMES
-from picard.util import find_executable
+
+from picard import (
+    config,
+    log,
+)
 from picard.acoustid.json_helpers import parse_recording
+from picard.const import FPCALC_NAMES
+from picard.const.sys import IS_FROZEN
+from picard.util import find_executable
 
 
 class AcoustIDClient(QtCore.QObject):
 
     def __init__(self):
-        QtCore.QObject.__init__(self)
+        super().__init__()
         self._queue = deque()
         self._running = 0
         self._max_processes = 2
 
-        if not config.setting["acoustid_fpcalc"]:
+        # The second condition is checked because in case of a packaged build of picard
+        # the temp directory that pyinstaller decompresses picard into changes on every
+        # launch, thus we need to ignore the existing config values.
+        if not config.setting["acoustid_fpcalc"] or IS_FROZEN:
             fpcalc_path = find_executable(*FPCALC_NAMES)
             if fpcalc_path:
                 config.setting["acoustid_fpcalc"] = fpcalc_path
@@ -46,15 +56,15 @@ class AcoustIDClient(QtCore.QObject):
         pass
 
     def _on_lookup_finished(self, next_func, file, document, http, error):
-
         doc = {}
         if error:
             mparms = {
                 'error': http.errorString(),
+                'body': document,
                 'filename': file.filename,
             }
             log.error(
-                "AcoustID: Lookup network error for '%(filename)s': %(error)r" %
+                "AcoustID: Lookup network error for '%(filename)s': %(error)r, %(body)s" %
                 mparms)
             self.tagger.window.set_statusbar_message(
                 N_("AcoustID lookup network error for '%(filename)s'!"),
@@ -62,32 +72,38 @@ class AcoustIDClient(QtCore.QObject):
                 echo=None
             )
         else:
-            recording_list = doc['recordings'] = []
-            status = document['status']
-            if status == 'ok':
-                results = document['results']
-                if results:
-                    result = results[0]
-                    file.metadata['acoustid_id'] = result['id']
-                    if 'recordings' in result:
-                        for recording in result['recordings']:
-                            parsed_recording = parse_recording(recording)
-                            if parsed_recording is not None:
-                                recording_list.append(parsed_recording)
-                        log.debug("AcoustID: Lookup successful for '%s'", file.filename)
-            else:
-                mparms = {
-                    'error': document['error']['message'],
-                    'filename': file.filename
-                }
-                log.error(
-                    "AcoustID: Lookup error for '%(filename)s': %(error)r" %
-                    mparms)
-                self.tagger.window.set_statusbar_message(
-                    N_("AcoustID lookup failed for '%(filename)s'!"),
-                    mparms,
-                    echo=None
-                )
+            try:
+                recording_list = doc['recordings'] = []
+                status = document['status']
+                if status == 'ok':
+                    results = document['results']
+                    if results:
+                        result = results[0]
+                        file.metadata['acoustid_id'] = result['id']
+                        if 'recordings' in result and result['recordings']:
+                            max_sources = max([r.get('sources', 1) for r in result['recordings']] + [1])
+                            for recording in result['recordings']:
+                                parsed_recording = parse_recording(recording)
+                                if parsed_recording is not None:
+                                    parsed_recording['score'] = recording.get('sources', 1) / max_sources * 100
+                                    recording_list.append(parsed_recording)
+                            log.debug("AcoustID: Lookup successful for '%s'", file.filename)
+                else:
+                    mparms = {
+                        'error': document['error']['message'],
+                        'filename': file.filename
+                    }
+                    log.error(
+                        "AcoustID: Lookup error for '%(filename)s': %(error)r" %
+                        mparms)
+                    self.tagger.window.set_statusbar_message(
+                        N_("AcoustID lookup failed for '%(filename)s'!"),
+                        mparms,
+                        echo=None
+                    )
+            except (AttributeError, KeyError, TypeError) as e:
+                log.error("AcoustID: Error reading response", exc_info=True)
+                error = e
 
         next_func(doc, http, error)
 
@@ -121,14 +137,14 @@ class AcoustIDClient(QtCore.QObject):
             mparms,
             echo=None
         )
-        params = dict(meta='recordings releasegroups releases tracks compress')
+        params = dict(meta='recordings releasegroups releases tracks compress sources')
         if result[0] == 'fingerprint':
             fp_type, fingerprint, length = result
             file.acoustid_fingerprint = fingerprint
             file.acoustid_length = length
             self.tagger.acoustidmanager.add(file, None)
             params['fingerprint'] = fingerprint
-            params['duration'] = string_(length)
+            params['duration'] = str(length)
         else:
             fp_type, recordingid = result
             params['recordingid'] = recordingid
@@ -144,19 +160,12 @@ class AcoustIDClient(QtCore.QObject):
         try:
             self._running -= 1
             self._run_next_task()
-            process = self.sender()
             if exit_code == 0 and exit_status == 0:
-                output = string_(process.readAllStandardOutput())
-                duration = None
-                fingerprint = None
-                for line in output.splitlines():
-                    parts = line.split('=', 1)
-                    if len(parts) != 2:
-                        continue
-                    if parts[0] == 'DURATION':
-                        duration = int(parts[1])
-                    elif parts[0] == 'FINGERPRINT':
-                        fingerprint = parts[1]
+                output = bytes(process.readAllStandardOutput()).decode()
+                jsondata = json.loads(output)
+                # Use only integer part of duration, floats are not allowed in lookup
+                duration = int(jsondata.get('duration'))
+                fingerprint = jsondata.get('fingerprint')
                 if fingerprint and duration:
                     result = 'fingerprint', fingerprint, duration
             else:
@@ -165,6 +174,8 @@ class AcoustIDClient(QtCore.QObject):
                     exit_code,
                     exit_status,
                     process.errorString())
+        except (json.decoder.JSONDecodeError, UnicodeDecodeError, ValueError):
+            log.error("Error reading fingerprint calculator output", exc_info=True)
         finally:
             next_func(result)
 
@@ -192,7 +203,7 @@ class AcoustIDClient(QtCore.QObject):
         process.setProperty('picard_finished', False)
         process.finished.connect(partial(self._on_fpcalc_finished, next_func, file))
         process.error.connect(partial(self._on_fpcalc_error, next_func, file))
-        process.start(fpcalc, ["-length", "120", file.filename])
+        process.start(fpcalc, ["-json", "-length", "120", file.filename])
         log.debug("Starting fingerprint calculator %r %r", fpcalc, file.filename)
 
     def analyze(self, file, next_func):
@@ -202,7 +213,8 @@ class AcoustIDClient(QtCore.QObject):
             # use cached fingerprint
             fingerprints = file.metadata.getall('acoustid_fingerprint')
             if fingerprints:
-                fpcalc_next(result=('fingerprint', fingerprints[0], 0))
+                length = int(file.metadata.length / 1000)
+                fpcalc_next(result=('fingerprint', fingerprints[0], length))
                 return
         # calculate the fingerprint
         task = (file, fpcalc_next)

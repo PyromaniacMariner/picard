@@ -18,7 +18,11 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 
 from picard import config
-from picard.ui.options import OptionsPage, register_options_page
+
+from picard.ui.options import (
+    OptionsPage,
+    register_options_page,
+)
 from picard.ui.ui_options_ratings import Ui_RatingsOptionsPage
 
 
@@ -38,7 +42,7 @@ class RatingsOptionsPage(OptionsPage):
     ]
 
     def __init__(self, parent=None):
-        super(RatingsOptionsPage, self).__init__(parent)
+        super().__init__(parent)
         self.ui = Ui_RatingsOptionsPage()
         self.ui.setupUi(self)
 

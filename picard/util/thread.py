@@ -19,13 +19,18 @@
 
 import sys
 import traceback
-from PyQt5.QtCore import QRunnable, QCoreApplication, QEvent
+
+from PyQt5.QtCore import (
+    QCoreApplication,
+    QEvent,
+    QRunnable,
+)
 
 
 class ProxyToMainEvent(QEvent):
 
     def __init__(self, func, *args, **kwargs):
-        QEvent.__init__(self, QEvent.User)
+        super().__init__(QEvent.User)
         self.func = func
         self.args = args
         self.kwargs = kwargs
@@ -36,26 +41,28 @@ class ProxyToMainEvent(QEvent):
 
 class Runnable(QRunnable):
 
-    def __init__(self, func, next_func):
-        QRunnable.__init__(self)
+    def __init__(self, func, next_func, traceback=True):
+        super().__init__()
         self.func = func
         self.next_func = next_func
+        self.traceback = traceback
 
     def run(self):
         try:
             result = self.func()
-        except:
+        except BaseException:
             from picard import log
-            log.error(traceback.format_exc())
+            if self.traceback:
+                log.error(traceback.format_exc())
             to_main(self.next_func, error=sys.exc_info()[1])
         else:
             to_main(self.next_func, result=result)
 
 
-def run_task(func, next_func, priority=0, thread_pool=None):
+def run_task(func, next_func, priority=0, thread_pool=None, traceback=True):
     if thread_pool is None:
         thread_pool = QCoreApplication.instance().thread_pool
-    thread_pool.start(Runnable(func, next_func), priority)
+    thread_pool.start(Runnable(func, next_func, traceback), priority)
 
 
 def to_main(func, *args, **kwargs):

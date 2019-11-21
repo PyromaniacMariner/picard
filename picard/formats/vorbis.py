@@ -19,25 +19,82 @@
 
 import base64
 import re
+
 import mutagen.flac
 import mutagen.ogg
 import mutagen.oggflac
+import mutagen.oggopus
 import mutagen.oggspeex
 import mutagen.oggtheora
 import mutagen.oggvorbis
-try:
-    from mutagen.oggopus import OggOpus
-    with_opus = True
-except ImportError:
-    OggOpus = None
-    with_opus = False
-from picard import config, log
-from picard.coverart.image import TagCoverArtImage, CoverArtImageError
+
+from picard import (
+    config,
+    log,
+)
+from picard.coverart.image import (
+    CoverArtImageError,
+    TagCoverArtImage,
+)
 from picard.file import File
-from picard.formats.id3 import types_from_id3, image_type_as_id3_num
-from picard.metadata import Metadata
-from picard.util import encode_filename, sanitize_date
 from picard.formats import guess_format
+from picard.formats.id3 import (
+    image_type_as_id3_num,
+    types_from_id3,
+)
+from picard.metadata import Metadata
+from picard.util import (
+    encode_filename,
+    sanitize_date,
+)
+
+
+FLAC_MAX_BLOCK_SIZE = 2 ** 24 - 1  # FLAC block size is limited to a 24 bit integer
+INVALID_CHARS = re.compile('([^\x20-\x7d]|=)')
+
+
+def sanitize_key(key):
+    """
+    Remove characters from key which are invalid for a Vorbis comment field name.
+    See https://www.xiph.org/vorbis/doc/v-comment.html#vectorformat
+    """
+    return INVALID_CHARS.sub('', key)
+
+
+def is_valid_key(key):
+    """
+    Return true if a string is a valid Vorbis comment key.
+    Valid characters for Vorbis comment field names are
+    ASCII 0x20 through 0x7D, 0x3D ('=') excluded.
+    """
+    return INVALID_CHARS.search(key) is None
+
+
+def flac_sort_pics_after_tags(metadata_blocks):
+    """
+    Reorder the metadata_blocks so that all picture blocks are located after
+    the first Vorbis comment block.
+
+    Windows fails to read FLAC tags if the picture blocks are located before
+    the Vorbis comments. Reordering the blocks fixes this.
+    """
+    # First remember all picture blocks that are located before the tag block.
+    tagindex = 0
+    picblocks = []
+    for block in metadata_blocks:
+        if block.code == mutagen.flac.VCFLACDict.code:
+            tagindex = metadata_blocks.index(block)
+            break
+        elif block.code == mutagen.flac.Picture.code:
+            picblocks.append(block)
+    else:
+        return  # No tags found, nothing to sort
+
+    # Now move those picture block after the tag block, maintaining their order.
+    for pic in picblocks:
+        metadata_blocks.remove(pic)
+        metadata_blocks.insert(tagindex, pic)
+
 
 class VCommentFile(File):
 
@@ -45,8 +102,11 @@ class VCommentFile(File):
     _File = None
 
     __translate = {
-        "musicbrainz_trackid": "musicbrainz_recordingid",
+        "movement": "movementnumber",
+        "movementname": "movement",
         "musicbrainz_releasetrackid": "musicbrainz_trackid",
+        "musicbrainz_trackid": "musicbrainz_recordingid",
+        "waveformatextensible_channel_mask": "~waveformatextensible_channel_mask",
     }
     __rtranslate = dict([(v, k) for k, v in __translate.items()])
 
@@ -81,10 +141,13 @@ class VCommentFile(File):
                         name, email = name.split(':', 1)
                     except ValueError:
                         email = ''
-                    if email != config.setting['rating_user_email']:
+                    if email != sanitize_key(config.setting['rating_user_email']):
                         continue
                     name = '~rating'
-                    value = string_(int(round((float(value) * (config.setting['rating_steps'] - 1)))))
+                    try:
+                        value = str(round((float(value) * (config.setting['rating_steps'] - 1))))
+                    except ValueError:
+                        log.warning('Invalid rating value in %r: %s', filename, value)
                 elif name == "fingerprint" and value.startswith("MusicMagic Fingerprint"):
                     name = "musicip_fingerprint"
                     value = value[22:]
@@ -97,8 +160,8 @@ class VCommentFile(File):
                         continue
                     name = "totaldiscs"
                 elif name == "metadata_block_picture":
-                    image = mutagen.flac.Picture(base64.standard_b64decode(value))
                     try:
+                        image = mutagen.flac.Picture(base64.standard_b64decode(value))
                         coverartimage = TagCoverArtImage(
                             file=filename,
                             tag=name,
@@ -107,11 +170,10 @@ class VCommentFile(File):
                             support_types=True,
                             data=image.data,
                         )
-                    except CoverArtImageError as e:
+                    except (CoverArtImageError, TypeError, ValueError, mutagen.flac.error) as e:
                         log.error('Cannot load image from %r: %s' % (filename, e))
                     else:
-                        metadata.append_image(coverartimage)
-
+                        metadata.images.append(coverartimage)
                     continue
                 elif name in self.__translate:
                     name = self.__translate[name]
@@ -130,7 +192,7 @@ class VCommentFile(File):
                 except CoverArtImageError as e:
                     log.error('Cannot load image from %r: %s' % (filename, e))
                 else:
-                    metadata.append_image(coverartimage)
+                    metadata.images.append(coverartimage)
 
         # Read the unofficial COVERART tags, for backward compatibility only
         if "metadata_block_picture" not in file.tags:
@@ -142,10 +204,10 @@ class VCommentFile(File):
                             tag='COVERART',
                             data=base64.standard_b64decode(data)
                         )
-                    except CoverArtImageError as e:
+                    except (CoverArtImageError, TypeError, ValueError) as e:
                         log.error('Cannot load image from %r: %s' % (filename, e))
                     else:
-                        metadata.append_image(coverartimage)
+                        metadata.images.append(coverartimage)
             except KeyError:
                 pass
         self._info(metadata, file)
@@ -159,21 +221,25 @@ class VCommentFile(File):
         if file.tags is None:
             file.add_tags()
         if config.setting["clear_existing_tags"]:
+            channel_mask = file.tags.get('waveformatextensible_channel_mask', None)
             file.tags.clear()
-        if (is_flac and (config.setting["clear_existing_tags"] or
-                         metadata.images_to_be_saved_to_tags)):
+            if channel_mask:
+                file.tags['waveformatextensible_channel_mask'] = channel_mask
+        images_to_save = list(metadata.images.to_be_saved_to_tags())
+        if is_flac and (config.setting["clear_existing_tags"] or images_to_save):
             file.clear_pictures()
         tags = {}
         for name, value in metadata.items():
             if name == '~rating':
                 # Save rating according to http://code.google.com/p/quodlibet/wiki/Specs_VorbisComments
-                if config.setting['rating_user_email']:
-                    name = 'rating:%s' % config.setting['rating_user_email']
+                user_email = sanitize_key(config.setting['rating_user_email'])
+                if user_email:
+                    name = 'rating:%s' % user_email
                 else:
                     name = 'rating'
-                value = string_(float(value) / (config.setting['rating_steps'] - 1))
+                value = str(float(value) / (config.setting['rating_steps'] - 1))
             # don't save private tags
-            elif name.startswith("~"):
+            elif name.startswith("~") or not self.supports_tag(name):
                 continue
             elif name.startswith('lyrics:'):
                 name = 'lyrics'
@@ -197,13 +263,23 @@ class VCommentFile(File):
         if "totaldiscs" in metadata:
             tags.setdefault("DISCTOTAL", []).append(metadata["totaldiscs"])
 
-        for image in metadata.images_to_be_saved_to_tags:
+        for image in images_to_save:
             picture = mutagen.flac.Picture()
             picture.data = image.data
             picture.mime = image.mimetype
             picture.desc = image.comment
+            picture.width = image.width
+            picture.height = image.height
             picture.type = image_type_as_id3_num(image.maintype)
-            if self._File == mutagen.flac.FLAC:
+            if is_flac:
+                # See https://xiph.org/flac/format.html#metadata_block_picture
+                expected_block_size = (8 * 4 + len(picture.data)
+                    + len(picture.mime)
+                    + len(picture.desc.encode('UTF-8')))
+                if expected_block_size > FLAC_MAX_BLOCK_SIZE:
+                    log.error('Failed saving image to %r: Image size of %d bytes exceeds maximum FLAC block size of %d bytes',
+                        filename, expected_block_size, FLAC_MAX_BLOCK_SIZE)
+                    continue
                 file.add_picture(picture)
             else:
                 tags.setdefault("METADATA_BLOCK_PICTURE", []).append(
@@ -212,6 +288,9 @@ class VCommentFile(File):
         file.tags.update(tags)
 
         self._remove_deleted_tags(metadata, file.tags)
+
+        if is_flac:
+            flac_sort_pics_after_tags(file.metadata_blocks)
 
         kwargs = {}
         if is_flac and config.setting["remove_id3_from_flac"]:
@@ -260,8 +339,14 @@ class VCommentFile(File):
         else:
             return name
 
-    def supports_tag(self, name):
-        return bool(name)
+    @classmethod
+    def supports_tag(cls, name):
+        unsupported_tags = ['r128_album_gain', 'r128_track_gain']
+        return (bool(name) and name not in unsupported_tags
+                and (is_valid_key(name)
+                    or name.startswith('comment:')
+                    or name.startswith('lyrics:')
+                    or name.startswith('performer:')))
 
 
 class FLACFile(VCommentFile):
@@ -271,10 +356,6 @@ class FLACFile(VCommentFile):
     NAME = "FLAC"
     _File = mutagen.flac.FLAC
 
-    def _info(self, metadata, file):
-        super(FLACFile, self)._info(metadata, file)
-        metadata['~format'] = self.NAME
-
 
 class OggFLACFile(VCommentFile):
 
@@ -283,10 +364,6 @@ class OggFLACFile(VCommentFile):
     NAME = "Ogg FLAC"
     _File = mutagen.oggflac.OggFLAC
 
-    def _info(self, metadata, file):
-        super(OggFLACFile, self)._info(metadata, file)
-        metadata['~format'] = self.NAME
-
 
 class OggSpeexFile(VCommentFile):
 
@@ -294,10 +371,6 @@ class OggSpeexFile(VCommentFile):
     EXTENSIONS = [".spx"]
     NAME = "Speex"
     _File = mutagen.oggspeex.OggSpeex
-
-    def _info(self, metadata, file):
-        super(OggSpeexFile, self)._info(metadata, file)
-        metadata['~format'] = self.NAME
 
 
 class OggTheoraFile(VCommentFile):
@@ -308,8 +381,8 @@ class OggTheoraFile(VCommentFile):
     _File = mutagen.oggtheora.OggTheora
 
     def _info(self, metadata, file):
-        super(OggTheoraFile, self)._info(metadata, file)
-        metadata['~format'] = self.NAME
+        super()._info(metadata, file)
+        metadata['~video'] = '1'
 
 
 class OggVorbisFile(VCommentFile):
@@ -319,21 +392,19 @@ class OggVorbisFile(VCommentFile):
     NAME = "Ogg Vorbis"
     _File = mutagen.oggvorbis.OggVorbis
 
-    def _info(self, metadata, file):
-        super(OggVorbisFile, self)._info(metadata, file)
-        metadata['~format'] = self.NAME
-
 
 class OggOpusFile(VCommentFile):
 
     """Ogg Opus file."""
     EXTENSIONS = [".opus"]
     NAME = "Ogg Opus"
-    _File = OggOpus
+    _File = mutagen.oggopus.OggOpus
 
-    def _info(self, metadata, file):
-        super(OggOpusFile, self)._info(metadata, file)
-        metadata['~format'] = self.NAME
+    @classmethod
+    def supports_tag(cls, name):
+        if name.startswith('r128_'):
+            return True
+        return VCommentFile.supports_tag(name)
 
 
 def OggAudioFile(filename):
@@ -341,8 +412,10 @@ def OggAudioFile(filename):
     options = [OggFLACFile, OggSpeexFile, OggVorbisFile]
     return guess_format(filename, options)
 
+
 OggAudioFile.EXTENSIONS = [".oga"]
 OggAudioFile.NAME = "Ogg Audio"
+OggAudioFile.supports_tag = VCommentFile.supports_tag
 
 
 def OggVideoFile(filename):
@@ -353,3 +426,4 @@ def OggVideoFile(filename):
 
 OggVideoFile.EXTENSIONS = [".ogv"]
 OggVideoFile.NAME = "Ogg Video"
+OggVideoFile.supports_tag = VCommentFile.supports_tag

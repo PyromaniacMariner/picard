@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
+from test.picardtestcase import PicardTestCase
 
-import unittest
 from picard.util import union_sorted_lists
 
 
-class UnionSortedListsTest(unittest.TestCase):
+class UnionSortedListsTest(PicardTestCase):
 
     def test_1(self):
         list1 = [1, 2, 3]
@@ -33,4 +33,3 @@ class UnionSortedListsTest(unittest.TestCase):
         expected = ['Back', 'Back, Spine', 'Front', 'Front, Side']
         r = union_sorted_lists(list1, list2)
         self.assertEqual(r, expected)
-

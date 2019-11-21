@@ -9,8 +9,8 @@
 # information, see <http://creativecommons.org/publicdomain/zero/1.0>
 
 
-def astrcmp_py(a,b):
-    "Calculates the Levenshtein distance between a and b."
+def astrcmp_py(a, b):
+    """Calculates the Levenshtein distance between a and b."""
     n, m = len(a), len(b)
     if n > m:
         # Make sure n <= m, to use O(min(n,m)) space

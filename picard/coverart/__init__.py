@@ -23,15 +23,24 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 
 
+from functools import partial
 import traceback
 
-from picard.coverart.providers import cover_art_providers, CoverArtProvider
-
-from functools import partial
-from picard import config, log
-from picard.coverart.image import (CoverArtImageIOError,
-                                   CoverArtImageIdentificationError)
 from PyQt5.QtCore import QObject
+
+from picard import (
+    config,
+    log,
+)
+from picard.coverart.image import (
+    CoverArtImageIdentificationError,
+    CoverArtImageIOError,
+)
+from picard.coverart.providers import (
+    CoverArtProvider,
+    cover_art_providers,
+)
+from picard.metadata import register_album_metadata_processor
 
 
 class CoverArt:
@@ -64,9 +73,9 @@ class CoverArt:
                     coverartimage,
                     coverartimage.imageinfo_as_string())
                 )
-                self.metadata.append_image(coverartimage)
+                self.metadata.images.append(coverartimage)
                 for track in self.album._new_tracks:
-                    track.metadata.append_image(coverartimage)
+                    track.metadata.images.append(coverartimage)
                 # If the image already was a front image,
                 # there might still be some other non-CAA front
                 # images in the queue - ignore them.
@@ -83,7 +92,6 @@ class CoverArt:
             raise e
         except CoverArtImageIdentificationError as e:
             self.album.error_append(e)
-
 
     def _coverart_downloaded(self, coverartimage, data, http, error):
         """Handle finished download, save it to metadata"""
@@ -120,36 +128,36 @@ class CoverArt:
             # album removed
             return
 
-        if (self.front_image_found and
-                config.setting["save_images_to_tags"] and not
-                config.setting["save_images_to_files"] and
-                config.setting["embed_only_one_front_image"]):
+        if (self.front_image_found
+            and config.setting["save_images_to_tags"]
+            and not config.setting["save_images_to_files"]
+            and config.setting["embed_only_one_front_image"]):
             # no need to continue
             self.album._finalize_loading(None)
             return
 
         if self._queue_empty():
-            if self.providers:
+            try:
                 # requeue from next provider
-                provider = self.providers.pop(0)
+                provider = next(self.providers)
                 ret = CoverArtProvider._STARTED
                 try:
-                    p = provider(self)
-                    if p.enabled():
+                    instance = provider.cls(self)
+                    if provider.enabled and instance.enabled():
                         log.debug("Trying cover art provider %s ..." %
-                                  provider.NAME)
-                        ret = p.queue_images()
+                                  provider.name)
+                        ret = instance.queue_images()
                     else:
                         log.debug("Skipping cover art provider %s ..." %
-                                  provider.NAME)
-                except:
+                                  provider.name)
+                except BaseException:
                     log.error(traceback.format_exc())
                     raise
                 finally:
                     if ret != CoverArtProvider.WAIT:
                         self.next_in_queue()
                     return
-            else:
+            except StopIteration:
                 # nothing more to do
                 self.album._finalize_loading(None)
                 return
@@ -165,14 +173,15 @@ class CoverArt:
             return
 
         # local files
-        if hasattr(coverartimage, 'filepath'):
+        if coverartimage.url and coverartimage.url.scheme() == 'file':
             try:
-                with open(coverartimage.filepath, 'rb') as file:
+                path = coverartimage.url.toLocalFile()
+                with open(path, 'rb') as file:
                     self._set_metadata(coverartimage, file.read())
             except IOError as ioexcept:
                 (errnum, errmsg) = ioexcept.args
                 log.error("Failed to read %r: %s (%d)" %
-                          (coverartimage.from_file, errmsg, errnum))
+                          (path, errmsg, errnum))
             except CoverArtImageIOError:
                 # It doesn't make sense to store/download more images if we can't
                 # save them in the temporary folder, abort.
@@ -202,20 +211,20 @@ class CoverArt:
         self.album._requests += 1
 
     def queue_put(self, coverartimage):
-        "Add an image to queue"
+        """Add an image to queue"""
         log.debug("Queuing cover art image %r", coverartimage)
         self.__queue.append(coverartimage)
 
     def _queue_get(self):
-        "Get next image and remove it from queue"
+        """Get next image and remove it from queue"""
         return self.__queue.pop(0)
 
     def _queue_empty(self):
-        "Returns True if the queue is empty"
+        """Returns True if the queue is empty"""
         return not self.__queue
 
     def _queue_new(self):
-        "Initialize the queue"
+        """Initialize the queue"""
         self.__queue = []
 
     def _message(self, *args, **kwargs):
@@ -223,10 +232,13 @@ class CoverArt:
         QObject.tagger.window.set_statusbar_message(*args, **kwargs)
 
 
-def coverart(album, metadata, release):
+def _retrieve_coverart(album, metadata, release):
     """Gets all cover art URLs from the metadata and then attempts to
     download the album art. """
 
     coverart = CoverArt(album, metadata, release)
     log.debug("New %r", coverart)
     coverart.retrieve()
+
+
+register_album_metadata_processor(_retrieve_coverart)

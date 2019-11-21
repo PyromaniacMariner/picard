@@ -17,12 +17,40 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 
-from mutagen.mp4 import MP4, MP4Cover
-from picard import config, log
-from picard.coverart.image import TagCoverArtImage, CoverArtImageError
+import re
+
+from mutagen.mp4 import (
+    MP4,
+    MP4Cover,
+)
+
+from picard import (
+    config,
+    log,
+)
+from picard.coverart.image import (
+    CoverArtImageError,
+    TagCoverArtImage,
+)
 from picard.file import File
+from picard.formats.mutagenext import delall_ci
 from picard.metadata import Metadata
 from picard.util import encode_filename
+
+
+def _add_text_values_to_metadata(metadata, name, values):
+    for value in values:
+        metadata.add(name, value.decode("utf-8", "replace").strip("\x00"))
+
+
+_VALID_KEY_CHARS = re.compile('^[\x00-\xff]+$')
+
+
+def _is_valid_key(key):
+    """
+    Return true if a string is a valid name for a custom tag.
+    """
+    return bool(_VALID_KEY_CHARS.match(key))
 
 
 class MP4File(File):
@@ -51,6 +79,8 @@ class MP4File(File):
         "sosn": "showsort",
         "tvsh": "show",
         "purl": "podcasturl",
+        "\xa9mvn": "movement",
+        "\xa9wrk": "work",
     }
     __r_text_tags = dict([(v, k) for k, v in __text_tags.items()])
 
@@ -63,6 +93,9 @@ class MP4File(File):
 
     __int_tags = {
         "tmpo": "bpm",
+        "\xa9mvi": "movementnumber",
+        "\xa9mvc": "movementtotal",
+        "shwm": "showmovement",
     }
     __r_int_tags = dict([(v, k) for k, v in __int_tags.items()])
 
@@ -80,6 +113,8 @@ class MP4File(File):
         "----:com.apple.iTunes:MusicBrainz Work Id": "musicbrainz_workid",
         "----:com.apple.iTunes:MusicBrainz Release Group Id": "musicbrainz_releasegroupid",
         "----:com.apple.iTunes:MusicBrainz Release Track Id": "musicbrainz_trackid",
+        "----:com.apple.iTunes:MusicBrainz Original Album Id": "musicbrainz_originalalbumid",
+        "----:com.apple.iTunes:MusicBrainz Original Artist Id": "musicbrainz_originalartistid",
         "----:com.apple.iTunes:Acoustid Fingerprint": "acoustid_fingerprint",
         "----:com.apple.iTunes:Acoustid Id": "acoustid_id",
         "----:com.apple.iTunes:ASIN": "asin",
@@ -107,18 +142,34 @@ class MP4File(File):
     }
     __r_freeform_tags = dict([(v, k) for k, v in __freeform_tags.items()])
 
+    # Tags to load case insensitive. Case is preserved, but the specified case
+    # is written if it is unset.
+    __r_freeform_tags_ci = {
+        "replaygain_album_gain": "----:com.apple.iTunes:REPLAYGAIN_ALBUM_GAIN",
+        "replaygain_album_peak": "----:com.apple.iTunes:REPLAYGAIN_ALBUM_PEAK",
+        "replaygain_album_range": "----:com.apple.iTunes:REPLAYGAIN_ALBUM_RANGE",
+        "replaygain_track_gain": "----:com.apple.iTunes:REPLAYGAIN_TRACK_GAIN",
+        "replaygain_track_peak": "----:com.apple.iTunes:REPLAYGAIN_TRACK_PEAK",
+        "replaygain_track_range": "----:com.apple.iTunes:REPLAYGAIN_TRACK_RANGE",
+        "replaygain_reference_loudness": "----:com.apple.iTunes:REPLAYGAIN_REFERENCE_LOUDNESS",
+    }
+    __freeform_tags_ci = dict([(b.lower(), a) for a, b in __r_freeform_tags_ci.items()])
+
     __other_supported_tags = ("discnumber", "tracknumber",
                               "totaldiscs", "totaltracks")
 
+    def __init__(self, filename):
+        super().__init__(filename)
+        self.__casemap = {}
+
     def _load(self, filename):
         log.debug("Loading file %r", filename)
+        self.__casemap = {}
         file = MP4(encode_filename(filename))
-        tags = file.tags
-        if tags is None:
-            file.add_tags()
-
+        tags = file.tags or {}
         metadata = Metadata()
         for name, values in tags.items():
+            name_lower = name.lower()
             if name in self.__text_tags:
                 for value in values:
                     metadata.add(self.__text_tags[name], value)
@@ -126,22 +177,31 @@ class MP4File(File):
                 metadata.add(self.__bool_tags[name], values and '1' or '0')
             elif name in self.__int_tags:
                 for value in values:
-                    metadata.add(self.__int_tags[name], string_(value))
+                    metadata.add(self.__int_tags[name], value)
             elif name in self.__freeform_tags:
-                for value in values:
-                    value = value.decode("utf-8", "replace").strip("\x00")
-                    metadata.add(self.__freeform_tags[name], value)
+                tag_name = self.__freeform_tags[name]
+                _add_text_values_to_metadata(metadata, tag_name, values)
+            elif name_lower in self.__freeform_tags_ci:
+                tag_name = self.__freeform_tags_ci[name_lower]
+                self.__casemap[tag_name] = name
+                _add_text_values_to_metadata(metadata, tag_name, values)
             elif name == "----:com.apple.iTunes:fingerprint":
                 for value in values:
                     value = value.decode("utf-8", "replace").strip("\x00")
                     if value.startswith("MusicMagic Fingerprint"):
                         metadata.add("musicip_fingerprint", value[22:])
             elif name == "trkn":
-                metadata["tracknumber"] = string_(values[0][0])
-                metadata["totaltracks"] = string_(values[0][1])
+                try:
+                    metadata["tracknumber"] = values[0][0]
+                    metadata["totaltracks"] = values[0][1]
+                except IndexError:
+                    log.debug('trkn is invalid, ignoring')
             elif name == "disk":
-                metadata["discnumber"] = string_(values[0][0])
-                metadata["totaldiscs"] = string_(values[0][1])
+                try:
+                    metadata["discnumber"] = values[0][0]
+                    metadata["totaldiscs"] = values[0][1]
+                except IndexError:
+                    log.debug('disk is invalid, ignoring')
             elif name == "covr":
                 for value in values:
                     if value.imageformat not in (value.FORMAT_JPEG,
@@ -157,7 +217,18 @@ class MP4File(File):
                         log.error('Cannot load image from %r: %s' %
                                   (filename, e))
                     else:
-                        metadata.append_image(coverartimage)
+                        metadata.images.append(coverartimage)
+            # Read other freeform tags always case insensitive
+            elif name.startswith('----:com.apple.iTunes:'):
+                tag_name = name_lower[22:]
+                self.__casemap[tag_name] = name[22:]
+                if (name not in self.__r_text_tags
+                    and name not in self.__r_bool_tags
+                    and name not in self.__r_int_tags
+                    and name not in self.__r_freeform_tags
+                    and name_lower not in self.__r_freeform_tags_ci
+                    and name not in self.__other_supported_tags):
+                    _add_text_values_to_metadata(metadata, tag_name, values)
 
         self._info(metadata, file)
         return metadata
@@ -165,9 +236,9 @@ class MP4File(File):
     def _save(self, filename, metadata):
         log.debug("Saving file %r", filename)
         file = MP4(encode_filename(self.filename))
-        tags = file.tags
-        if tags is None:
+        if file.tags is None:
             file.add_tags()
+        tags = file.tags
 
         if config.setting["clear_existing_tags"]:
             tags.clear()
@@ -187,8 +258,21 @@ class MP4File(File):
             elif name in self.__r_freeform_tags:
                 values = [v.encode("utf-8") for v in values]
                 tags[self.__r_freeform_tags[name]] = values
+            elif name in self.__r_freeform_tags_ci:
+                values = [v.encode("utf-8") for v in values]
+                delall_ci(tags, self.__r_freeform_tags_ci[name])
+                if name in self.__casemap:
+                    name = self.__casemap[name]
+                else:
+                    name = self.__r_freeform_tags_ci[name]
+                tags[name] = values
             elif name == "musicip_fingerprint":
                 tags["----:com.apple.iTunes:fingerprint"] = [b"MusicMagic Fingerprint%s" % v.encode('ascii') for v in values]
+            elif self.supports_tag(name) and name not in ('tracknumber',
+                    'totaltracks', 'discnumber', 'totaldiscs'):
+                values = [v.encode("utf-8") for v in values]
+                name = self.__casemap.get(name, name)
+                tags['----:com.apple.iTunes:' + name] = values
 
         if "tracknumber" in metadata:
             if "totaltracks" in metadata:
@@ -205,7 +289,7 @@ class MP4File(File):
                 tags["disk"] = [(int(metadata["discnumber"]), 0)]
 
         covr = []
-        for image in metadata.images_to_be_saved_to_tags:
+        for image in metadata.images.to_be_saved_to_tags():
             if image.mimetype == "image/jpeg":
                 covr.append(MP4Cover(image.data, MP4Cover.FORMAT_JPEG))
             elif image.mimetype == "image/png":
@@ -225,13 +309,16 @@ class MP4File(File):
                 if tag not in ("totaltracks", "totaldiscs"):
                     del tags[real_name]
 
-    def supports_tag(self, name):
-        return (name in self.__r_text_tags
-                or name in self.__r_bool_tags
-                or name in self.__r_freeform_tags
-                or name in self.__other_supported_tags
-                or name.startswith('lyrics:')
-                or name in ('~length', 'musicip_fingerprint'))
+    @classmethod
+    def supports_tag(cls, name):
+        unsupported_tags = ['r128_album_gain', 'r128_track_gain']
+        return ((name
+                 and not name.startswith("~")
+                 and name not in unsupported_tags
+                 and not (name.startswith('comment:') and len(name) > 9)
+                 and not name.startswith('performer:')
+                 and _is_valid_key(name))
+                or name in ('~length'))
 
     def _get_tag_name(self, name):
         if name.startswith('lyrics:'):
@@ -244,6 +331,8 @@ class MP4File(File):
             return self.__r_int_tags[name]
         elif name in self.__r_freeform_tags:
             return self.__r_freeform_tags[name]
+        elif name in self.__r_freeform_tags_ci:
+            return self.__r_freeform_tags_ci[name]
         elif name == "musicip_fingerprint":
             return "----:com.apple.iTunes:fingerprint"
         elif name in ("tracknumber", "totaltracks"):
@@ -254,6 +343,11 @@ class MP4File(File):
             return None
 
     def _info(self, metadata, file):
-        super(MP4File, self)._info(metadata, file)
+        super()._info(metadata, file)
         if hasattr(file.info, 'codec_description') and file.info.codec_description:
             metadata['~format'] = "%s (%s)" % (metadata['~format'], file.info.codec_description)
+        filename = file.filename
+        if isinstance(filename, bytes):
+            filename = filename.decode()
+        if filename.lower().endswith(".m4v") or 'hdvd' in file.tags:
+            metadata['~video'] = '1'

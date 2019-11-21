@@ -1,6 +1,11 @@
-import unittest
 from unittest.mock import patch
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import (
+    parse_qs,
+    urlparse,
+)
+
+from test.picardtestcase import PicardTestCase
+
 from picard.browser.filelookup import FileLookup
 from picard.util import webbrowser2
 
@@ -10,9 +15,10 @@ PORT = 443
 LOCAL_PORT = "8000"
 
 
-class BrowserLookupTest(unittest.TestCase):
+class BrowserLookupTest(PicardTestCase):
 
     def setUp(self):
+        super().setUp()
         self.lookup = FileLookup(None, SERVER, PORT, LOCAL_PORT)
 
     @patch.object(webbrowser2, 'open')
@@ -29,7 +35,7 @@ class BrowserLookupTest(unittest.TestCase):
         for i, type_ in enumerate(lookups):
             lookups[type_]['function']("123")
 
-            url = urlparse(string_(mock_open.call_args[0][0]))
+            url = urlparse(mock_open.call_args[0][0])
             path = url.path.split('/')[1:]
             query_args = parse_qs(url.query)
 

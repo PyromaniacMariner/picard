@@ -20,6 +20,7 @@
 from picard.const import MB_ATTRIBUTES
 from picard.i18n import gettext_attr
 
+
 # list of types from http://musicbrainz.org/doc/Cover_Art/Types
 # order of declaration is preserved in selection box
 CAA_TYPES = []
@@ -39,4 +40,5 @@ def translate_caa_type(name):
     if name == 'unknown':
         return _(CAA_TYPES_TR[name])
     else:
-        return gettext_attr(CAA_TYPES_TR[name], "cover_art_type")
+        title = CAA_TYPES_TR.get(name, name)
+        return gettext_attr(title, "cover_art_type")

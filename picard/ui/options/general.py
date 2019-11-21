@@ -17,13 +17,19 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 
-from PyQt5.QtWidgets import QInputDialog
+from PyQt5 import QtCore
+
 from picard import config
-from picard.util import webbrowser2
-from picard.ui.options import OptionsPage, register_options_page
+from picard.const import (
+    MUSICBRAINZ_SERVERS,
+    PROGRAM_UPDATE_LEVELS,
+)
+
+from picard.ui.options import (
+    OptionsPage,
+    register_options_page,
+)
 from picard.ui.ui_options_general import Ui_GeneralOptionsPage
-from picard.const import MUSICBRAINZ_SERVERS
-from picard.collection import load_user_collections
 
 
 class GeneralOptionsPage(OptionsPage):
@@ -45,10 +51,14 @@ class GeneralOptionsPage(OptionsPage):
         config.TextOption("persist", "oauth_access_token", ""),
         config.IntOption("persist", "oauth_access_token_expires", 0),
         config.TextOption("persist", "oauth_username", ""),
+        config.BoolOption("setting", "check_for_updates", True),
+        config.IntOption("setting", "update_check_days", 7),
+        config.IntOption("setting", "update_level", 0),
+        config.IntOption("persist", "last_update_check", 0),
     ]
 
     def __init__(self, parent=None):
-        super(GeneralOptionsPage, self).__init__(parent)
+        super().__init__(parent)
         self.ui = Ui_GeneralOptionsPage()
         self.ui.setupUi(self)
         self.ui.server_host.addItems(MUSICBRAINZ_SERVERS)
@@ -61,12 +71,27 @@ class GeneralOptionsPage(OptionsPage):
         self.ui.server_port.setValue(config.setting["server_port"])
         self.ui.analyze_new_files.setChecked(config.setting["analyze_new_files"])
         self.ui.ignore_file_mbids.setChecked(config.setting["ignore_file_mbids"])
+        if self.tagger.autoupdate_enabled:
+            self.ui.check_for_updates.setChecked(config.setting["check_for_updates"])
+            self.ui.update_level.clear()
+            for level, description in PROGRAM_UPDATE_LEVELS.items():
+                # TODO: Remove temporary workaround once https://github.com/python-babel/babel/issues/415 has been resolved.
+                babel_415_workaround = description['title']
+                self.ui.update_level.addItem(_(babel_415_workaround), level)
+            self.ui.update_level.setCurrentIndex(self.ui.update_level.findData(config.setting["update_level"]))
+            self.ui.update_check_days.setValue(config.setting["update_check_days"])
+        else:
+            self.ui.update_check_groupbox.hide()
 
     def save(self):
         config.setting["server_host"] = self.ui.server_host.currentText().strip()
         config.setting["server_port"] = self.ui.server_port.value()
         config.setting["analyze_new_files"] = self.ui.analyze_new_files.isChecked()
         config.setting["ignore_file_mbids"] = self.ui.ignore_file_mbids.isChecked()
+        if self.tagger.autoupdate_enabled:
+            config.setting["check_for_updates"] = self.ui.check_for_updates.isChecked()
+            config.setting["update_level"] = self.ui.update_level.currentData(QtCore.Qt.UserRole)
+            config.setting["update_check_days"] = self.ui.update_check_days.value()
 
     def update_login_logout(self):
         if self.tagger.webservice.oauth_manager.is_logged_in():
@@ -78,35 +103,23 @@ class GeneralOptionsPage(OptionsPage):
             self.ui.logged_in.hide()
             self.ui.login.show()
             self.ui.logout.hide()
+        # Workaround for Qt not repainting the view on macOS after the changes.
+        # See https://tickets.metabrainz.org/browse/PICARD-1654
+        self.ui.vboxlayout.parentWidget().repaint()
 
     def login(self):
-        scopes = "profile tag rating collection submit_isrc submit_barcode"
-        authorization_url = self.tagger.webservice.oauth_manager.get_authorization_url(scopes)
-        webbrowser2.open(authorization_url)
-        authorization_code, ok = QInputDialog.getText(self,
-            _("MusicBrainz Account"), _("Authorization code:"))
-        if ok:
-            self.tagger.webservice.oauth_manager.exchange_authorization_code(
-                authorization_code, scopes, self.on_authorization_finished)
+        self.tagger.mb_login(self.on_login_finished, self)
 
     def restore_defaults(self):
-        super(GeneralOptionsPage, self).restore_defaults()
+        super().restore_defaults()
         self.logout()
-
-    def on_authorization_finished(self, successful):
-        if successful:
-            self.tagger.webservice.oauth_manager.fetch_username(
-                self.on_login_finished)
 
     def on_login_finished(self, successful):
         self.update_login_logout()
-        if successful:
-            load_user_collections()
 
     def logout(self):
-        self.tagger.webservice.oauth_manager.revoke_tokens()
+        self.tagger.mb_logout()
         self.update_login_logout()
-        load_user_collections()
 
 
 register_options_page(GeneralOptionsPage)

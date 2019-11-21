@@ -21,25 +21,29 @@
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
+from hashlib import md5
 import os
 import shutil
-import sys
 import tempfile
 
-from hashlib import md5
-from PyQt5.QtCore import QUrl, QObject, QMutex
-from picard import config, log
+from PyQt5.QtCore import (
+    QMutex,
+    QObject,
+    QUrl,
+)
+
+from picard import (
+    config,
+    log,
+)
 from picard.coverart.utils import translate_caa_type
-from picard.script import ScriptParser
+from picard.metadata import Metadata
 from picard.util import (
+    decode_filename,
     encode_filename,
-    replace_win32_incompat,
-    imageinfo
+    imageinfo,
 )
-from picard.util.textencoding import (
-    replace_non_ascii,
-    unaccent,
-)
+from picard.util.scripttofilename import script_to_filename
 
 
 _datafiles = dict()
@@ -77,7 +81,7 @@ class DataHash:
         if self._filename:
             try:
                 os.unlink(self._filename)
-            except:
+            except BaseException:
                 pass
             else:
                 _datafile_mutex.lock()
@@ -118,12 +122,14 @@ class CoverArtImage:
     # formats may have types associated with cover art, but some other sources
     # don't provide such information
     support_types = False
+    # Indicates that the source supports multiple types per image.
+    support_multi_types = False
     # `is_front` has to be explicitly set, it is used to handle CAA is_front
     # indicator
     is_front = None
     sourceprefix = "URL"
 
-    def __init__(self, url=None, types=None, comment='', data=None):
+    def __init__(self, url=None, types=None, comment='', data=None, support_types=None, support_multi_types=None):
         if types is None:
             self.types = []
         else:
@@ -139,16 +145,20 @@ class CoverArtImage:
         self.can_be_saved_to_tags = True
         self.can_be_saved_to_disk = True
         self.can_be_saved_to_metadata = True
+        if support_types is not None:
+            self.support_types = support_types
+        if support_multi_types is not None:
+            self.support_multi_types = support_multi_types
         if data is not None:
             self.set_data(data)
 
     def parse_url(self, url):
         self.url = QUrl(url)
-        self.host = string_(self.url.host())
-        self.port = self.url.port(80)
-        self.path = string_(self.url.path(QUrl.FullyEncoded))
+        self.host = self.url.host()
+        self.port = self.url.port(443 if self.url.scheme() == 'https' else 80)
+        self.path = self.url.path(QUrl.FullyEncoded)
         if self.url.hasQuery():
-            self.path += '?' + string_(self.url.query(QUrl.FullyEncoded))
+            self.path += '?' + self.url.query(QUrl.FullyEncoded)
 
     @property
     def source(self):
@@ -190,6 +200,8 @@ class CoverArtImage:
             p.append("url=%r" % self.url.toString())
         if self.types:
             p.append("types=%r" % self.types)
+        p.append('support_types=%r' % self.support_types)
+        p.append('support_multi_types=%r' % self.support_types)
         if self.is_front is not None:
             p.append("is_front=%r" % self.is_front)
         if self.comment:
@@ -208,8 +220,11 @@ class CoverArtImage:
 
     def __eq__(self, other):
         if self and other:
-            if self.types and other.types:
-                return (self.datahash, self.types) == (other.datahash, other.types)
+            if self.support_types and other.support_types:
+                if self.support_multi_types and other.support_multi_types:
+                    return (self.datahash, self.types) == (other.datahash, other.types)
+                else:
+                    return (self.datahash, self.maintype) == (other.datahash, other.maintype)
             else:
                 return self.datahash == other.datahash
         elif not self and not other:
@@ -253,22 +268,20 @@ class CoverArtImage:
         # TODO: do something better than randomly using the first in the list
         return self.types[0]
 
-    def _make_image_filename(self, filename, dirname, metadata):
-        filename = ScriptParser().eval(filename, metadata)
-        if config.setting["ascii_filenames"]:
-            if isinstance(filename, str):
-                filename = unaccent(filename)
-            filename = replace_non_ascii(filename)
+    def _make_image_filename(self, filename, dirname, _metadata):
+        metadata = Metadata()
+        metadata.copy(_metadata)
+        metadata["coverart_maintype"] = self.maintype
+        metadata["coverart_comment"] = self.comment
+        if self.is_front:
+            metadata.add_unique("coverart_types", "front")
+        for cover_type in self.types:
+            metadata.add_unique("coverart_types", cover_type)
+        filename = script_to_filename(filename, metadata)
         if not filename:
             filename = "cover"
         if not os.path.isabs(filename):
             filename = os.path.join(dirname, filename)
-        # replace incompatible characters
-        if config.setting["windows_compatibility"] or sys.platform == "win32":
-            filename = replace_win32_incompat(filename)
-        # remove null characters
-        if isinstance(filename, bytes):
-            filename = filename.replace(b"\x00", "")
         return encode_filename(filename)
 
     def save(self, dirname, metadata, counters):
@@ -281,8 +294,8 @@ class CoverArtImage:
         """
         if not self.can_be_saved_to_disk:
             return
-        if (config.setting["caa_image_type_as_filename"] and
-            not self.is_front_image()):
+        if (config.setting["caa_image_type_as_filename"]
+            and not self.is_front_image()):
             filename = self.maintype
             log.debug("Make cover filename from types: %r -> %r",
                       self.types, filename)
@@ -315,11 +328,11 @@ class CoverArtImage:
 
     def _next_filename(self, filename, counters):
         if counters[filename]:
-            new_filename = b"%b (%d)" % (filename, counters[filename])
+            new_filename = "%s (%d)" % (decode_filename(filename), counters[filename])
         else:
             new_filename = filename
         counters[filename] += 1
-        return new_filename
+        return encode_filename(new_filename)
 
     def _is_write_needed(self, filename):
         if (os.path.exists(filename)
@@ -342,13 +355,17 @@ class CoverArtImage:
     def tempfile_filename(self):
         return self.datahash.filename
 
-    def types_as_string(self, translate=True, separator=', '):
+    def normalized_types(self):
         if self.types:
-            types = self.types
+            types = sorted(set(self.types))
         elif self.is_front_image():
             types = ['front']
         else:
             types = ['-']
+        return types
+
+    def types_as_string(self, translate=True, separator=', '):
+        types = self.normalized_types()
         if translate:
             types = [translate_caa_type(type) for type in types]
         return separator.join(types)
@@ -359,11 +376,11 @@ class CaaCoverArtImage(CoverArtImage):
     """Image from Cover Art Archive"""
 
     support_types = True
+    support_multi_types = True
     sourceprefix = "CAA"
 
     def __init__(self, url, types=None, is_front=False, comment='', data=None):
-        CoverArtImage.__init__(self, url=url, types=types, comment=comment,
-                               data=data)
+        super().__init__(url=url, types=types, comment=comment, data=data)
         self.is_front = is_front
 
 
@@ -373,8 +390,7 @@ class CaaThumbnailCoverArtImage(CaaCoverArtImage):
     property"""
 
     def __init__(self, url, types=None, is_front=False, comment='', data=None):
-        CaaCoverArtImage.__init__(self, url=url, types=types, comment=comment,
-                                  data=data)
+        super().__init__(url=url, types=types, comment=comment, data=data)
         self.is_front = False
         self.can_be_saved_to_disk = False
         self.can_be_saved_to_tags = False
@@ -386,12 +402,13 @@ class TagCoverArtImage(CoverArtImage):
     """Image from file tags"""
 
     def __init__(self, file, tag=None, types=None, is_front=None,
-                 support_types=False, comment='', data=None):
-        CoverArtImage.__init__(self, url=None, types=types, comment=comment,
-                               data=data)
+                 support_types=False, comment='', data=None,
+                 support_multi_types=False):
+        super().__init__(url=None, types=types, comment=comment, data=data)
         self.sourcefile = file
         self.tag = tag
         self.support_types = support_types
+        self.support_multi_types = support_multi_types
         if is_front is not None:
             self.is_front = is_front
 
@@ -417,31 +434,13 @@ class TagCoverArtImage(CoverArtImage):
         return "%s(%s)" % (self.__class__.__name__, ", ".join(p))
 
 
-class CoverArtImageFromFile(CoverArtImage):
+class LocalFileCoverArtImage(CoverArtImage):
 
     sourceprefix = 'LOCAL'
 
-    def __init__(self, filepath, types=None, is_front=None,
-                 support_types=False, comment='', data=None):
-        CoverArtImage.__init__(self, url=None, types=types, comment=comment,
-                               data=data)
-        self.filepath = filepath
+    def __init__(self, filepath, types=None, comment='',
+                 support_types=False, support_multi_types=False):
+        url = QUrl.fromLocalFile(filepath).toString()
+        super().__init__(url=url, types=types, comment=comment)
         self.support_types = support_types
-        if is_front is not None:
-            self.is_front = is_front
-
-    @property
-    def source(self):
-        return '%s %s' % (self.sourceprefix, self.filepath)
-
-    def __repr__(self):
-        p = []
-        p.append('%r' % self.filepath)
-        if self.types:
-            p.append("types=%r" % self.types)
-        if self.is_front is not None:
-            p.append("is_front=%r" % self.is_front)
-        p.append('support_types=%r' % self.support_types)
-        if self.comment:
-            p.append("comment=%r" % self.comment)
-        return "%s(%s)" % (self.__class__.__name__, ", ".join(p))
+        self.support_multi_types = support_multi_types

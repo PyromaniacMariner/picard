@@ -18,20 +18,33 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 
-from PyQt5 import QtCore, QtGui, QtWidgets
 from collections import defaultdict
 from functools import partial
+
+from PyQt5 import (
+    QtCore,
+    QtGui,
+    QtWidgets,
+)
+
 from picard import config
 from picard.album import Album
-from picard.cluster import Cluster
-from picard.track import Track
-from picard.file import File
-from picard.util import format_time, throttle, thread, uniqify
-from picard.util.tags import display_tag_name
-from picard.ui.edittagdialog import EditTagDialog
-from picard.metadata import MULTI_VALUED_JOINER
-from picard.browser.filelookup import FileLookup
 from picard.browser.browser import BrowserIntegration
+from picard.browser.filelookup import FileLookup
+from picard.cluster import Cluster
+from picard.file import File
+from picard.metadata import MULTI_VALUED_JOINER
+from picard.track import Track
+from picard.util import (
+    format_time,
+    restore_method,
+    thread,
+    throttle,
+)
+from picard.util.tags import display_tag_name
+
+from picard.ui.colors import interface_colors
+from picard.ui.edittagdialog import EditTagDialog
 
 
 COMMON_TAGS = [
@@ -46,13 +59,12 @@ COMMON_TAGS = [
 
 class TagStatus:
 
-    NoChange = 1
-    Added = 2
-    Removed = 4
-    # Added | Removed = Changed
-    Changed = 6
-    Empty = 8
-    NotRemovable = 16
+    NOCHANGE = 1
+    ADDED = 2
+    REMOVED = 4
+    CHANGED = ADDED | REMOVED
+    EMPTY = 8
+    NOTREMOVABLE = 16
 
 
 class TagCounter(dict):
@@ -65,7 +77,7 @@ class TagCounter(dict):
         self.different = set()
 
     def __getitem__(self, tag):
-        return dict.get(self, tag, [""])
+        return super().get(tag, [""])
 
     def add(self, tag, values):
         if tag not in self.different:
@@ -96,18 +108,19 @@ class TagCounter(dict):
 
 class TagDiff(object):
 
-    __slots__ = ("tag_names", "new", "orig", "status", "objects")
+    __slots__ = ("tag_names", "new", "orig", "status", "objects", "max_length_delta_ms")
 
-    def __init__(self):
+    def __init__(self, max_length_diff=2):
         self.tag_names = []
         self.new = TagCounter(self)
         self.orig = TagCounter(self)
         self.status = defaultdict(lambda: 0)
         self.objects = 0
+        self.max_length_delta_ms = max_length_diff * 1000
 
     def __tag_ne(self, tag, orig, new):
         if tag == "~length":
-            return abs(float(orig) - float(new)) > 2000
+            return abs(float(orig) - float(new)) > self.max_length_delta_ms
         else:
             return orig != new
 
@@ -119,27 +132,53 @@ class TagDiff(object):
             self.new.add(tag, new_values)
 
         if (orig_values and not new_values) or removed:
-            self.status[tag] |= TagStatus.Removed
+            self.status[tag] |= TagStatus.REMOVED
         elif new_values and not orig_values:
-            self.status[tag] |= TagStatus.Added
+            self.status[tag] |= TagStatus.ADDED
             removable = True
         elif orig_values and new_values and self.__tag_ne(tag, orig_values, new_values):
-            self.status[tag] |= TagStatus.Changed
+            self.status[tag] |= TagStatus.CHANGED
         elif not (orig_values or new_values or tag in COMMON_TAGS):
-            self.status[tag] |= TagStatus.Empty
+            self.status[tag] |= TagStatus.EMPTY
         else:
-            self.status[tag] |= TagStatus.NoChange
+            self.status[tag] |= TagStatus.NOCHANGE
 
         if not removable:
-            self.status[tag] |= TagStatus.NotRemovable
+            self.status[tag] |= TagStatus.NOTREMOVABLE
 
     def tag_status(self, tag):
         status = self.status[tag]
-        for s in (TagStatus.Changed, TagStatus.Added,
-                  TagStatus.Removed, TagStatus.Empty):
+        for s in (TagStatus.CHANGED, TagStatus.ADDED,
+                  TagStatus.REMOVED, TagStatus.EMPTY):
             if status & s == s:
                 return s
-        return TagStatus.NoChange
+        return TagStatus.NOCHANGE
+
+
+class PreservedTags:
+
+    opt_name = 'preserved_tags'
+
+    def __init__(self):
+        self._tags = self._from_config()
+
+    def _to_config(self):
+        config.setting[self.opt_name] = ", ".join(sorted(self._tags))
+
+    def _from_config(self):
+        tags = config.setting[self.opt_name].split(',')
+        return set(filter(bool, map(str.strip, tags)))
+
+    def add(self, name):
+        self._tags.add(name)
+        self._to_config()
+
+    def discard(self, name):
+        self._tags.discard(name)
+        self._to_config()
+
+    def __contains__(self, key):
+        return key in self._tags
 
 
 class MetadataBox(QtWidgets.QTableWidget):
@@ -150,7 +189,7 @@ class MetadataBox(QtWidgets.QTableWidget):
     )
 
     def __init__(self, parent):
-        QtWidgets.QTableWidget.__init__(self, parent)
+        super().__init__(parent)
         self.parent = parent
         self.setAccessibleName(_("metadata view"))
         self.setAccessibleDescription(_("Displays original and new tags for the selected files"))
@@ -166,12 +205,6 @@ class MetadataBox(QtWidgets.QTableWidget):
         self.setTabKeyNavigation(False)
         self.setStyleSheet("QTableWidget {border: none;}")
         self.setAttribute(QtCore.Qt.WA_MacShowFocusRect, 1)
-        self.colors = {
-            TagStatus.NoChange: self.palette().color(QtGui.QPalette.Text),
-            TagStatus.Removed: QtGui.QBrush(QtGui.QColor("red")),
-            TagStatus.Added: QtGui.QBrush(QtGui.QColor("green")),
-            TagStatus.Changed: QtGui.QBrush(QtGui.QColor("darkgoldenrod"))
-        }
         self.files = set()
         self.tracks = set()
         self.objects = set()
@@ -193,6 +226,7 @@ class MetadataBox(QtWidgets.QTableWidget):
         self.edit_tag_shortcut = QtWidgets.QShortcut(QtGui.QKeySequence(_("Alt+Shift+E")), self, partial(self.edit_selected_tag))
         # TR: Keyboard shortcut for "Remove" (tag)
         self.remove_tag_shortcut = QtWidgets.QShortcut(QtGui.QKeySequence(_("Alt+Shift+R")), self, self.remove_selected_tags)
+        self.preserved_tags = PreservedTags()
 
     def get_file_lookup(self):
         """Return a FileLookup object."""
@@ -236,7 +270,7 @@ class MetadataBox(QtWidgets.QTableWidget):
             else:
                 self.editing = item
                 item.setText(values[0])
-                return QtWidgets.QTableWidget.edit(self, index, trigger, event)
+                return super().edit(index, trigger, event)
         return False
 
     def event(self, e):
@@ -251,10 +285,10 @@ class MetadataBox(QtWidgets.QTableWidget):
                     self.clipboard = list(self.tag_diff.new[tag])
             elif e.key() == QtCore.Qt.Key_V and column == 2 and tag != "~length":
                 self.set_tag_values(tag, list(self.clipboard))
-        return QtWidgets.QTableWidget.event(self, e)
+        return super().event(e)
 
     def closeEditor(self, editor, hint):
-        QtWidgets.QTableWidget.closeEditor(self, editor, hint)
+        super().closeEditor(editor, hint)
         tag = self.tag_diff.tag_names[self.editing.row()]
         old = self.tag_diff.new[tag]
         new = [editor.text()]
@@ -268,59 +302,57 @@ class MetadataBox(QtWidgets.QTableWidget):
     def contextMenuEvent(self, event):
         menu = QtWidgets.QMenu(self)
         if self.objects:
-            tags = self.selected_tags(discard=('~length'))
+            tags = self.selected_tags(discard=('~length',))
             if len(tags) == 1:
                 selected_tag = tags[0]
                 edit_tag_action = QtWidgets.QAction(_("Edit..."), self.parent)
                 edit_tag_action.triggered.connect(partial(self.edit_tag, selected_tag))
                 edit_tag_action.setShortcut(self.edit_tag_shortcut.key())
                 menu.addAction(edit_tag_action)
-                preserved_tags = [tag for tag in
-                                  map(lambda x: x.strip(), config.setting['preserved_tags'].split(','))
-                                  if tag != ""]
-                if selected_tag not in preserved_tags:
+                if selected_tag not in self.preserved_tags:
                     add_to_preserved_tags_action = QtWidgets.QAction(_("Add to 'Preserve Tags' List"), self.parent)
-                    add_to_preserved_tags_action.triggered.connect(partial(self.add_to_preserved_tags, selected_tag, preserved_tags))
+                    add_to_preserved_tags_action.triggered.connect(partial(self.preserved_tags.add, selected_tag))
                     menu.addAction(add_to_preserved_tags_action)
                 else:
                     remove_from_preserved_tags_action = QtWidgets.QAction(_("Remove from 'Preserve Tags' List"), self.parent)
-                    remove_from_preserved_tags_action.triggered.connect(partial(self.remove_from_preserved_tags, selected_tag, preserved_tags))
+                    remove_from_preserved_tags_action.triggered.connect(partial(self.preserved_tags.discard, selected_tag))
                     menu.addAction(remove_from_preserved_tags_action)
             removals = []
             useorigs = []
             item = self.currentItem()
-            column = item.column()
-            for tag in tags:
-                if tag in self.lookup_tags().keys():
-                    if (column == 1 or column == 2) and len(tags) == 1 and item.text():
-                        if column == 1:
-                            values = self.tag_diff.orig[tag]
-                        else:
-                            values = self.tag_diff.new[tag]
-                        lookup_action = QtWidgets.QAction(_("Lookup in &Browser"), self.parent)
-                        lookup_action.triggered.connect(partial(self.open_link, values, tag))
-                        menu.addAction(lookup_action)
-                if self.tag_is_removable(tag):
-                    removals.append(partial(self.remove_tag, tag))
-                status = self.tag_diff.status[tag] & TagStatus.Changed
-                if status == TagStatus.Changed or status == TagStatus.Removed:
-                    for file in self.files:
-                        objects = [file]
-                        if file.parent in self.tracks and len(self.files & set(file.parent.linked_files)) == 1:
-                            objects.append(file.parent)
-                        orig_values = list(file.orig_metadata.getall(tag)) or [""]
-                        useorigs.append(partial(self.set_tag_values, tag, orig_values, objects))
-            if removals:
-                remove_tag_action = QtWidgets.QAction(_("Remove"), self.parent)
-                remove_tag_action.triggered.connect(lambda: [f() for f in removals])
-                remove_tag_action.setShortcut(self.remove_tag_shortcut.key())
-                menu.addAction(remove_tag_action)
-            if useorigs:
-                name = ngettext("Use Original Value", "Use Original Values", len(useorigs))
-                use_orig_value_action = QtWidgets.QAction(name, self.parent)
-                use_orig_value_action.triggered.connect(lambda: [f() for f in useorigs])
-                menu.addAction(use_orig_value_action)
-                menu.addSeparator()
+            if item:
+                column = item.column()
+                for tag in tags:
+                    if tag in self.lookup_tags().keys():
+                        if (column == 1 or column == 2) and len(tags) == 1 and item.text():
+                            if column == 1:
+                                values = self.tag_diff.orig[tag]
+                            else:
+                                values = self.tag_diff.new[tag]
+                            lookup_action = QtWidgets.QAction(_("Lookup in &Browser"), self.parent)
+                            lookup_action.triggered.connect(partial(self.open_link, values, tag))
+                            menu.addAction(lookup_action)
+                    if self.tag_is_removable(tag):
+                        removals.append(partial(self.remove_tag, tag))
+                    status = self.tag_diff.status[tag] & TagStatus.CHANGED
+                    if status == TagStatus.CHANGED or status == TagStatus.REMOVED:
+                        for file in self.files:
+                            objects = [file]
+                            if file.parent in self.tracks and len(self.files & set(file.parent.linked_files)) == 1:
+                                objects.append(file.parent)
+                            orig_values = list(file.orig_metadata.getall(tag)) or [""]
+                            useorigs.append(partial(self.set_tag_values, tag, orig_values, objects))
+                if removals:
+                    remove_tag_action = QtWidgets.QAction(_("Remove"), self.parent)
+                    remove_tag_action.triggered.connect(lambda: [f() for f in removals])
+                    remove_tag_action.setShortcut(self.remove_tag_shortcut.key())
+                    menu.addAction(remove_tag_action)
+                if useorigs:
+                    name = ngettext("Use Original Value", "Use Original Values", len(useorigs))
+                    use_orig_value_action = QtWidgets.QAction(name, self.parent)
+                    use_orig_value_action.triggered.connect(lambda: [f() for f in useorigs])
+                    menu.addAction(use_orig_value_action)
+                    menu.addSeparator()
             if len(tags) == 1 or removals or useorigs:
                 menu.addSeparator()
             menu.addAction(self.add_tag_action)
@@ -329,23 +361,11 @@ class MetadataBox(QtWidgets.QTableWidget):
         menu.exec_(event.globalPos())
         event.accept()
 
-    @staticmethod
-    def _save_preserved_tags(preserved_tags):
-        config.setting['preserved_tags'] = ", ".join(uniqify(preserved_tags))
-
-    def add_to_preserved_tags(self, name, preserved_tags):
-        preserved_tags.append(name)
-        self._save_preserved_tags(preserved_tags)
-
-    def remove_from_preserved_tags(self, name, preserved_tags):
-        preserved_tags = [tag for tag in preserved_tags if tag != name]
-        self._save_preserved_tags(preserved_tags)
-
     def edit_tag(self, tag):
         EditTagDialog(self.parent, tag).exec_()
 
     def edit_selected_tag(self):
-        tags = self.selected_tags(discard=('~length'))
+        tags = self.selected_tags(discard=('~length',))
         if len(tags) == 1:
             self.edit_tag(tags[0])
 
@@ -357,7 +377,12 @@ class MetadataBox(QtWidgets.QTableWidget):
         if objects is None:
             objects = self.objects
         self.parent.ignore_selection_changes = True
-        if values != [""] or self.tag_is_removable(tag):
+        if values == [""]:
+            values = []
+        if not values and self.tag_is_removable(tag):
+            for obj in objects:
+                del obj.metadata[tag]
+        elif values:
             for obj in objects:
                 obj.metadata[tag] = values
                 obj.update()
@@ -365,15 +390,15 @@ class MetadataBox(QtWidgets.QTableWidget):
         self.parent.ignore_selection_changes = False
 
     def remove_tag(self, tag):
-        self.set_tag_values(tag, [""])
+        self.set_tag_values(tag, [])
 
     def remove_selected_tags(self):
-        for tag in self.selected_tags(discard=('~length')):
+        for tag in self.selected_tags(discard=('~length',)):
             if self.tag_is_removable(tag):
                 self.remove_tag(tag)
 
     def tag_is_removable(self, tag):
-        return self.tag_diff.status[tag] & TagStatus.NotRemovable == 0
+        return self.tag_diff.status[tag] & TagStatus.NOTREMOVABLE == 0
 
     def selected_tags(self, discard=None):
         if discard is None:
@@ -416,7 +441,8 @@ class MetadataBox(QtWidgets.QTableWidget):
             return
         if self.selection_dirty:
             self._update_selection()
-        thread.run_task(self._update_tags, self._update_items)
+        thread.run_task(self._update_tags, self._update_items,
+            thread_pool=self.tagger.priority_thread_pool)
 
     def _update_tags(self):
         self.selection_mutex.lock()
@@ -427,7 +453,14 @@ class MetadataBox(QtWidgets.QTableWidget):
         if not (files or tracks):
             return None
 
-        tag_diff = TagDiff()
+        self.colors = {
+            TagStatus.NOCHANGE: self.palette().color(QtGui.QPalette.Text),
+            TagStatus.REMOVED: QtGui.QBrush(interface_colors.get_qcolor('tagstatus_removed')),
+            TagStatus.ADDED: QtGui.QBrush(interface_colors.get_qcolor('tagstatus_added')),
+            TagStatus.CHANGED: QtGui.QBrush(interface_colors.get_qcolor('tagstatus_changed'))
+        }
+
+        tag_diff = TagDiff(max_length_diff=config.setting["ignore_track_duration_difference_under"])
         orig_tags = tag_diff.orig
         new_tags = tag_diff.new
         # existing_tags are orig_tags that would not be overwritten by
@@ -454,7 +487,7 @@ class MetadataBox(QtWidgets.QTableWidget):
                 tag_diff.add(name, orig_values, new_values, True, removed)
 
             tag_diff.add("~length",
-                         string_(orig_metadata.length), string_(new_metadata.length), False)
+                         str(orig_metadata.length), str(new_metadata.length), False)
 
         for track in tracks:
             if track.num_linked_files == 0:
@@ -462,15 +495,15 @@ class MetadataBox(QtWidgets.QTableWidget):
                     if not name.startswith("~"):
                         tag_diff.add(name, values, values, True)
 
-                length = string_(track.metadata.length)
+                length = str(track.metadata.length)
                 tag_diff.add("~length", length, length, False)
 
                 tag_diff.objects += 1
 
         all_tags = set(list(orig_tags.keys()) + list(new_tags.keys()))
-        tag_names = COMMON_TAGS + \
-                    sorted(all_tags.difference(COMMON_TAGS),
-                           key=lambda x: display_tag_name(x).lower())
+        common_tags = [tag for tag in COMMON_TAGS if tag in all_tags]
+        tag_names = common_tags + sorted(all_tags.difference(common_tags),
+                                         key=lambda x: display_tag_name(x).lower())
 
         if config.persist["show_changes_first"]:
             tags_by_status = {}
@@ -478,13 +511,13 @@ class MetadataBox(QtWidgets.QTableWidget):
             for tag in tag_names:
                 tags_by_status.setdefault(tag_diff.tag_status(tag), []).append(tag)
 
-            for status in (TagStatus.Changed, TagStatus.Added,
-                           TagStatus.Removed, TagStatus.NoChange):
+            for status in (TagStatus.CHANGED, TagStatus.ADDED,
+                           TagStatus.REMOVED, TagStatus.NOCHANGE):
                 tag_diff.tag_names += tags_by_status.pop(status, [])
         else:
             tag_diff.tag_names = [
                 tag for tag in tag_names if
-                tag_diff.status[tag] != TagStatus.Empty]
+                tag_diff.status[tag] != TagStatus.EMPTY]
 
         return tag_diff
 
@@ -507,7 +540,6 @@ class MetadataBox(QtWidgets.QTableWidget):
         new_flags = orig_flags | QtCore.Qt.ItemIsEditable
 
         for i, name in enumerate(result.tag_names):
-            length = name == "~length"
             tag_item = self.item(i, 0)
             orig_item = self.item(i, 1)
             new_item = self.item(i, 2)
@@ -527,11 +559,14 @@ class MetadataBox(QtWidgets.QTableWidget):
                 self.setItem(i, 2, new_item)
             tag_item.setText(display_tag_name(name))
             self.set_item_value(orig_item, self.tag_diff.orig, name)
-            new_item.setFlags(orig_flags if length else new_flags)
+            if name == "~length":
+                new_item.setFlags(orig_flags)
+            else:
+                new_item.setFlags(new_flags)
             self.set_item_value(new_item, self.tag_diff.new, name)
 
             font = new_item.font()
-            if result.tag_status(name) == TagStatus.Removed:
+            if result.tag_status(name) == TagStatus.REMOVED:
                 font.setStrikeOut(True)
             else:
                 font.setStrikeOut(False)
@@ -539,7 +574,7 @@ class MetadataBox(QtWidgets.QTableWidget):
             new_item.setFont(font)
 
             color = self.colors.get(result.tag_status(name),
-                                    self.colors[TagStatus.NoChange])
+                                    self.colors[TagStatus.NOCHANGE])
             orig_item.setForeground(color)
             new_item.setForeground(color)
 
@@ -550,6 +585,7 @@ class MetadataBox(QtWidgets.QTableWidget):
         font.setItalic(italic)
         item.setFont(font)
 
+    @restore_method
     def restore_state(self):
         state = config.persist["metadatabox_header_state"]
         header = self.horizontalHeader()

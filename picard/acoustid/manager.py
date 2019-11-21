@@ -18,7 +18,9 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 
 from functools import partial
+
 from PyQt5 import QtCore
+
 from picard import log
 from picard.util import load_json
 
@@ -36,7 +38,7 @@ class Submission(object):
 class AcoustIDManager(QtCore.QObject):
 
     def __init__(self):
-        QtCore.QObject.__init__(self)
+        super().__init__()
         self._fingerprints = {}
 
     def add(self, file, recordingid):
@@ -66,7 +68,7 @@ class AcoustIDManager(QtCore.QObject):
                 yield submission
 
     def _check_unsubmitted(self):
-        enabled = next(self._unsubmitted(), None) != None
+        enabled = next(self._unsubmitted(), None) is not None
         self.tagger.window.enable_submit(enabled)
 
     def submit(self):
@@ -87,7 +89,7 @@ class AcoustIDManager(QtCore.QObject):
             try:
                 error = load_json(document)
                 message = error["error"]["message"]
-            except :
+            except BaseException:
                 message = ""
             mparms = {
                 'error': http.errorString(),

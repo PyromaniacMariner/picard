@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>640</width>
-    <height>240</height>
+    <width>720</width>
+    <height>360</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -29,13 +29,15 @@
    </item>
    <item>
     <widget class="QTreeWidget" name="release_list">
-     <property name="rootIsDecorated">
-      <bool>false</bool>
-     </property>
+     <column>
+      <property name="text">
+       <string notr="true">1</string>
+      </property>
+     </column>
     </widget>
    </item>
    <item>
-    <layout class="QHBoxLayout">
+    <layout class="QHBoxLayout" name="hboxlayout">
      <property name="spacing">
       <number>6</number>
      </property>
@@ -43,7 +45,7 @@
       <number>0</number>
      </property>
      <item>
-      <spacer>
+      <spacer name="hspacer">
        <property name="orientation">
         <enum>Qt::Horizontal</enum>
        </property>
@@ -61,21 +63,21 @@
         <bool>false</bool>
        </property>
        <property name="text">
-        <string>OK</string>
+        <string>&amp;Load into Picard</string>
        </property>
       </widget>
      </item>
      <item>
       <widget class="QPushButton" name="lookup_button">
        <property name="text">
-        <string>Lookup manually</string>
+        <string>Lookup in &amp;Browser</string>
        </property>
       </widget>
      </item>
      <item>
       <widget class="QPushButton" name="cancel_button">
        <property name="text">
-        <string>Cancel</string>
+        <string>&amp;Cancel</string>
        </property>
       </widget>
      </item>
@@ -84,7 +86,9 @@
   </layout>
  </widget>
  <tabstops>
+  <tabstop>release_list</tabstop>
   <tabstop>ok_button</tabstop>
+  <tabstop>lookup_button</tabstop>
   <tabstop>cancel_button</tabstop>
  </tabstops>
  <resources/>
@@ -96,8 +100,8 @@
    <slot>accept()</slot>
    <hints>
     <hint type="sourcelabel">
-     <x>278</x>
-     <y>253</y>
+     <x>410</x>
+     <y>227</y>
     </hint>
     <hint type="destinationlabel">
      <x>96</x>
@@ -112,8 +116,8 @@
    <slot>reject()</slot>
    <hints>
     <hint type="sourcelabel">
-     <x>369</x>
-     <y>253</y>
+     <x>629</x>
+     <y>227</y>
     </hint>
     <hint type="destinationlabel">
      <x>179</x>

@@ -16,8 +16,14 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 
-from PyQt5 import QtCore, QtGui, QtWidgets
+from PyQt5 import (
+    QtCore,
+    QtGui,
+    QtWidgets,
+)
+
 from picard.util import icontheme
+
 from picard.ui.ui_infostatus import Ui_InfoStatus
 
 
@@ -60,19 +66,25 @@ class InfoStatus(QtWidgets.QWidget, Ui_InfoStatus):
         self.val4.setToolTip(t4)
         self.label4.setToolTip(t4)
 
-    def setFiles(self, num):
-        self.val1.setText(string_(num))
+    def update(self, files=0, albums=0, pending_files=0, pending_requests=0):
+        self.set_files(files)
+        self.set_albums(albums)
+        self.set_pending_files(pending_files)
+        self.set_pending_requests(pending_requests)
 
-    def setAlbums(self, num):
-        self.val2.setText(string_(num))
+    def set_files(self, num):
+        self.val1.setText(str(num))
 
-    def setPendingFiles(self, num):
-        self.val3.setText(string_(num))
+    def set_albums(self, num):
+        self.val2.setText(str(num))
 
-    def setPendingRequests(self, num):
+    def set_pending_files(self, num):
+        self.val3.setText(str(num))
+
+    def set_pending_requests(self, num):
         if num <= 0:
             enabled = QtGui.QIcon.Disabled
         else:
             enabled = QtGui.QIcon.Normal
         self.label4.setPixmap(self.icon_download.pixmap(self._size, enabled))
-        self.val4.setText(string_(num))
+        self.val4.setText(str(num))

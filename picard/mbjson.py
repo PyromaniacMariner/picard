@@ -18,72 +18,78 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 
 import re
+
 from picard import config
-from picard.util import (format_time, translate_from_sortname, parse_amazon_url,
-                         linear_combination_of_weights)
 from picard.const import RELEASE_FORMATS
+from picard.util import (
+    format_time,
+    linear_combination_of_weights,
+    parse_amazon_url,
+    translate_from_sortname,
+)
 
 
 _artist_rel_types = {
-    "composer": "composer",
-    "writer": "writer",
-    "conductor": "conductor",
-    "chorus master": "conductor",
-    "performing orchestra": "performer:orchestra",
     "arranger": "arranger",
-    "orchestrator": "arranger",
-    "instrumentator": "arranger",
-    "lyricist": "lyricist",
-    "librettist": "lyricist",
-    "remixer": "remixer",
-    "producer": "producer",
-    "engineer": "engineer",
     "audio": "engineer",
-    #"Mastering": "engineer",
-    "sound": "engineer",
+    "chorus master": "conductor",
+    "composer": "composer",
+    "concertmaster": "performer:concertmaster",
+    "conductor": "conductor",
+    "engineer": "engineer",
+    "instrumentator": "arranger",
+    "librettist": "lyricist",
     "live sound": "engineer",
-    "mix": "mixer",
-    #"Recording": "engineer",
+    "lyricist": "lyricist",
+    # "mastering": "engineer",
     "mix-DJ": "djmixer",
+    "mix": "mixer",
+    "orchestrator": "arranger",
+    "performing orchestra": "performer:orchestra",
+    "producer": "producer",
+    # "recording": "engineer",
+    "remixer": "remixer",
+    "sound": "engineer",
+    "writer": "writer",
 }
 
 _TRACK_TO_METADATA = {
-    'title': 'title',
-    'position': 'tracknumber',
     'number': '~musicbrainz_tracknumber',
+    'position': 'tracknumber',
+    'title': 'title',
 }
 
 _MEDIUM_TO_METADATA = {
-    'title': 'discsubtitle',
-    'position': 'discnumber',
-    'track-count': 'totaltracks',
     'format': 'media',
+    'position': 'discnumber',
+    'title': 'discsubtitle',
+    'track-count': 'totaltracks',
 }
 
 _RECORDING_TO_METADATA = {
-    'title': 'title',
     'disambiguation': '~recordingcomment',
+    'title': 'title',
 }
 
 _RELEASE_TO_METADATA = {
-    'title': 'album',
-    'disambiguation': '~releasecomment',
     'asin': 'asin',
-    'date': 'date',
+    'barcode': 'barcode',
     'country': 'releasecountry',
-    'barcode': 'barcode'
+    'date': 'date',
+    'disambiguation': '~releasecomment',
+    'title': 'album',
 }
 
 _ARTIST_TO_METADATA = {
-    'name': 'name',
     'gender': 'gender',
+    'name': 'name',
     'type': 'type',
 }
 
 _RELEASE_GROUP_TO_METADATA = {
-    'title': '~releasegroup',
     'disambiguation': '~releasegroupcomment',
     'first-release-date': 'originaldate',
+    'title': '~releasegroup',
 }
 
 
@@ -92,26 +98,39 @@ def _decamelcase(text):
 
 
 _REPLACE_MAP = {}
-_EXTRA_ATTRS = ['guest', 'additional', 'minor']
+_PREFIX_ATTRS = ['guest', 'additional', 'minor', 'solo']
 _BLANK_SPECIAL_RELTYPES = {'vocal': 'vocals'}
 
 
-def _parse_attributes(attrs, reltype):
-    attrs = [_decamelcase(_REPLACE_MAP.get(a, a)) for a in attrs]
-    prefix = ' '.join([a for a in attrs if a in _EXTRA_ATTRS])
-    attrs = [a for a in attrs if a not in _EXTRA_ATTRS]
-    len_attrs = len(attrs)
-    if len_attrs > 1:
-        attrs = '%s and %s' % (', '.join(attrs[:-1]), attrs[-1:][0])
-    elif len_attrs == 1:
-        attrs = attrs[0]
+def _transform_attribute(attr, attr_credits):
+    if attr in attr_credits:
+        return attr_credits[attr]
     else:
-        attrs = _BLANK_SPECIAL_RELTYPES.get(reltype, '')
-    return ' '.join([prefix, attrs]).strip().lower()
+        return _decamelcase(_REPLACE_MAP.get(attr, attr))
+
+
+def _parse_attributes(attrs, reltype, attr_credits):
+    prefixes = []
+    nouns = []
+    for attr in attrs:
+        attr = _transform_attribute(attr, attr_credits)
+        if attr in _PREFIX_ATTRS:
+            prefixes.append(attr)
+        else:
+            nouns.append(attr)
+    prefix = ' '.join(prefixes)
+    if len(nouns) > 1:
+        result = '%s and %s' % (', '.join(nouns[:-1]), nouns[-1:][0])
+    elif len(nouns) == 1:
+        result = nouns[0]
+    else:
+        result = _BLANK_SPECIAL_RELTYPES.get(reltype, '')
+    return ' '.join([prefix, result]).strip().lower()
 
 
 def _relations_to_metadata(relations, m):
-    use_credited_as = not config.setting["standardize_artists"]
+    use_credited_as = not config.setting['standardize_artists']
+    use_instrument_credits = not config.setting['standardize_instruments']
     for relation in relations:
         if relation['target-type'] == 'artist':
             artist = relation['artist']
@@ -126,7 +145,11 @@ def _relations_to_metadata(relations, m):
             if 'attributes' in relation:
                 attribs = [a for a in relation['attributes']]
             if reltype in ('vocal', 'instrument', 'performer'):
-                name = 'performer:' + _parse_attributes(attribs, reltype)
+                if use_instrument_credits:
+                    attr_credits = relation.get('attribute-credits', {})
+                else:
+                    attr_credits = {}
+                name = 'performer:' + _parse_attributes(attribs, reltype, attr_credits)
             elif reltype == 'mix-DJ' and len(attribs) > 0:
                 if not hasattr(m, "_djmix_ars"):
                     m._djmix_ars = {}
@@ -242,9 +265,9 @@ def artist_credit_to_metadata(node, m, release=False):
         m["~artists_sort"] = artistssort
 
 
-def country_list_from_node(node):
+def countries_from_node(node):
+    countries = []
     if "release-events" in node:
-        country = []
         for release_event in node['release-events']:
             try:
                 country_code = release_event['area']['iso-3166-1-codes'][0]
@@ -253,8 +276,24 @@ def country_list_from_node(node):
                 pass
             else:
                 if country_code:
-                    country.append(country_code)
-        return country
+                    countries.append(country_code)
+    return countries
+
+
+def release_dates_and_countries_from_node(node):
+    dates = []
+    countries = []
+    if "release-events" in node:
+        for release_event in node['release-events']:
+            dates.append(release_event['date'] or '')
+            country_code = ''
+            try:
+                country_code = release_event['area']['iso-3166-1-codes'][0]
+            # TypeError in case object is None
+            except (KeyError, IndexError, TypeError):
+                pass
+            countries.append(country_code)
+    return dates, countries
 
 
 def label_info_from_node(node):
@@ -287,7 +326,7 @@ def media_formats_from_node(node):
         count = formats_count[medium_format]
         medium_format = RELEASE_FORMATS.get(medium_format, medium_format)
         if count > 1:
-            medium_format = string_(count) + "×" + medium_format
+            medium_format = str(count) + "×" + medium_format
         formats.append(medium_format)
     return " + ".join(formats)
 
@@ -326,14 +365,16 @@ def recording_to_metadata(node, m, track=None):
             artist_credit_to_metadata(value, m)
             # set tags from artists
             if track:
-                for artist in value:
-                    track.append_track_artist(artist['artist']['id'])
+                for credit in value:
+                    artist = credit['artist']
+                    artist_obj = track.append_track_artist(artist['id'])
+                    add_genres_from_node(artist, artist_obj)
         elif key == 'relations':
             _relations_to_metadata(value, m)
-        elif key == 'tags' and track:
-            add_folksonomy_tags(value, track)
-        elif key == 'user-tags' and track:
-            add_user_folksonomy_tags(value, track)
+        elif key in ('genres', 'tags') and track:
+            add_genres(value, track)
+        elif key in ('user-genres', 'user-tags') and track:
+            add_user_genres(value, track)
         elif key == 'isrcs':
             add_isrcs_to_metadata(value, m)
         elif key == 'video' and value:
@@ -388,9 +429,9 @@ def artist_to_metadata(node, m):
                 ended = value['ended']
                 if ended and "end" in value:
                     m["enddate"] = value['end']
-        elif key == "begin_area":
+        elif key == "begin-area":
             m["beginarea"] = value['name']
-        elif key == "end_area":
+        elif key == "end-area":
             m["endarea"] = value['name']
 
 
@@ -408,8 +449,10 @@ def release_to_metadata(node, m, album=None):
             artist_credit_to_metadata(value, m, release=True)
             # set tags from artists
             if album is not None:
-                for artist in value:
-                    album.append_album_artist(artist['artist']['id'])
+                for credit in value:
+                    artist = credit['artist']
+                    artist_obj = album.append_album_artist(artist['id'])
+                    add_genres_from_node(artist, artist_obj)
         elif key == 'relations':
             _relations_to_metadata(value, m)
         elif key == 'label-info':
@@ -419,10 +462,7 @@ def release_to_metadata(node, m, album=None):
                 m['~releaselanguage'] = value['language']
             if 'script' in value:
                 m['script'] = value['script']
-        elif key == 'tags':
-            add_folksonomy_tags(value, album)
-        elif key == 'user-tags':
-            add_user_folksonomy_tags(value, album)
+    add_genres_from_node(node, album)
 
 
 def release_group_to_metadata(node, m, release_group=None):
@@ -433,14 +473,11 @@ def release_group_to_metadata(node, m, release_group=None):
             continue
         if key in _RELEASE_GROUP_TO_METADATA:
             m[_RELEASE_GROUP_TO_METADATA[key]] = value
-        elif key == 'tags':
-            add_folksonomy_tags(value, release_group)
-        elif key == 'user-tags':
-            add_user_folksonomy_tags(value, release_group)
         elif key == 'primary-type':
             m['~primaryreleasetype'] = value.lower()
         elif key == 'secondary-types':
             add_secondary_release_types(value, m)
+    add_genres_from_node(node, release_group)
     if m['originaldate']:
         m['originalyear'] = m['originaldate'][:4]
     m['releasetype'] = m.getall('~primaryreleasetype') + m.getall('~secondaryreleasetype')
@@ -451,21 +488,32 @@ def add_secondary_release_types(node, m):
         m.add_unique('~secondaryreleasetype', secondary_type.lower())
 
 
-def add_folksonomy_tags(node, obj):
-    if obj is not None:
-        for tag in node:
-            key = tag['name']
-            count = tag['count']
-            if key:
-                obj.add_folksonomy_tag(key, count)
+def add_genres_from_node(node, obj):
+    if obj is None:
+        return
+    if 'genres' in node:
+        add_genres(node['genres'], obj)
+    if 'tags' in node:
+        add_genres(node['tags'], obj)
+    if 'user-genres' in node:
+        add_user_genres(node['user-genres'], obj)
+    if 'user-tags' in node:
+        add_user_genres(node['user-tags'], obj)
 
 
-def add_user_folksonomy_tags(node, obj):
-    if obj is not None:
-        for tag in node:
-            key = tag['name']
-            if key:
-                obj.add_folksonomy_tag(key, 1)
+def add_genres(node, obj):
+    for tag in node:
+        key = tag['name']
+        count = tag['count']
+        if key:
+            obj.add_genre(key, count)
+
+
+def add_user_genres(node, obj):
+    for tag in node:
+        key = tag['name']
+        if key:
+            obj.add_genre(key, 1)
 
 
 def add_isrcs_to_metadata(node, metadata):

@@ -20,7 +20,7 @@
 from picard import log
 from picard.plugin import ExtensionPoint
 
-_formats = ExtensionPoint()
+_formats = ExtensionPoint(label='formats')
 _extensions = {}
 
 
@@ -38,6 +38,10 @@ def supported_formats():
 def supported_extensions():
     """Returns list of supported extensions."""
     return [ext for exts, name in supported_formats() for ext in exts]
+
+
+def ext_to_format(ext):
+    return _extensions.get(ext, None)
 
 
 def guess_format(filename, options=_formats):
@@ -86,57 +90,60 @@ def open_(filename):
 
 from picard.formats.id3 import (
     AiffFile,
+    DSFFile,
     MP3File,
     TrueAudioFile,
 )
-if AiffFile:
-    register_format(AiffFile)
+register_format(AiffFile)
+register_format(DSFFile)
 register_format(MP3File)
 register_format(TrueAudioFile)
 
 from picard.formats.apev2 import (
+    AACFile,
     MonkeysAudioFile,
     MusepackFile,
     OptimFROGFile,
-    WavPackFile,
     TAKFile,
+    WavPackFile,
 )
-register_format(MusepackFile)
-register_format(WavPackFile)
-register_format(OptimFROGFile)
+register_format(AACFile)
 register_format(MonkeysAudioFile)
+register_format(MusepackFile)
+register_format(OptimFROGFile)
 register_format(TAKFile)
+register_format(WavPackFile)
 
 from picard.formats.vorbis import (
     FLACFile,
     OggFLACFile,
     OggSpeexFile,
+    OggTheoraFile,
     OggVorbisFile,
     OggAudioFile,
     OggVideoFile,
     OggOpusFile,
-    with_opus,
 )
 register_format(FLACFile)
 register_format(OggFLACFile)
 register_format(OggSpeexFile)
+register_format(OggTheoraFile)
 register_format(OggVorbisFile)
-if with_opus:
-    register_format(OggOpusFile)
+register_format(OggOpusFile)
 register_format(OggAudioFile)
 register_format(OggVideoFile)
 
-try:
-    from picard.formats.mp4 import MP4File
-    register_format(MP4File)
-except ImportError:
-    pass
+from picard.formats.mp4 import MP4File
+register_format(MP4File)
 
-try:
-    from picard.formats.asf import ASFFile
-    register_format(ASFFile)
-except ImportError:
-    pass
+from picard.formats.asf import ASFFile
+register_format(ASFFile)
 
 from picard.formats.wav import WAVFile
 register_format(WAVFile)
+
+from picard.formats.midi import MIDIFile
+register_format(MIDIFile)
+
+from picard.formats.ac3 import AC3File
+register_format(AC3File)

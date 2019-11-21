@@ -24,8 +24,8 @@
 
 
 from picard import log
-from picard.coverart.providers import CoverArtProvider
 from picard.coverart.image import CoverArtImage
+from picard.coverart.providers import CoverArtProvider
 
 
 class CoverArtProviderWhitelist(CoverArtProvider):
@@ -35,10 +35,6 @@ class CoverArtProviderWhitelist(CoverArtProvider):
 
     NAME = "Whitelist"
     TITLE = N_('Whitelist')
-
-    def enabled(self):
-        return (super(CoverArtProviderWhitelist, self).enabled()
-                and not self.coverart.front_image_found)
 
     def queue_images(self):
         self.match_url_relations(('cover art link', 'has_cover_art_at'),

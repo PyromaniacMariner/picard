@@ -17,19 +17,51 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 
+from collections import defaultdict
+from functools import partial
+from heapq import (
+    heappop,
+    heappush,
+)
 import os
 import re
-from functools import partial
-from PyQt5 import QtCore, QtGui, QtWidgets
-from picard import config, log
-from picard.album import Album, NatAlbum
-from picard.cluster import Cluster, ClusterList, UnclusteredFiles
+
+from PyQt5 import (
+    QtCore,
+    QtGui,
+    QtWidgets,
+)
+
+from picard import (
+    config,
+    log,
+)
+from picard.album import (
+    Album,
+    NatAlbum,
+)
+from picard.cluster import (
+    Cluster,
+    ClusterList,
+    UnclusteredFiles,
+)
 from picard.file import File
-from picard.track import Track, NonAlbumTrack
-from picard.util import encode_filename, icontheme
 from picard.plugin import ExtensionPoint
-from picard.ui.ratingwidget import RatingWidget
+from picard.track import (
+    NonAlbumTrack,
+    Track,
+)
+from picard.util import (
+    encode_filename,
+    icontheme,
+    natsort,
+    restore_method,
+)
+
 from picard.ui.collectionmenu import CollectionMenu
+from picard.ui.colors import interface_colors
+from picard.ui.ratingwidget import RatingWidget
+from picard.ui.scriptsmenu import ScriptsMenu
 
 
 class BaseAction(QtWidgets.QAction):
@@ -37,7 +69,7 @@ class BaseAction(QtWidgets.QAction):
     MENU = []
 
     def __init__(self):
-        QtWidgets.QAction.__init__(self, self.NAME, None)
+        super().__init__(self.NAME, None)
         self.triggered.connect(self.__callback)
 
     def __callback(self):
@@ -48,11 +80,11 @@ class BaseAction(QtWidgets.QAction):
         raise NotImplementedError
 
 
-_album_actions = ExtensionPoint()
-_cluster_actions = ExtensionPoint()
-_clusterlist_actions = ExtensionPoint()
-_track_actions = ExtensionPoint()
-_file_actions = ExtensionPoint()
+_album_actions = ExtensionPoint(label='album_actions')
+_cluster_actions = ExtensionPoint(label='cluster_actions')
+_clusterlist_actions = ExtensionPoint(label='clusterlist_actions')
+_track_actions = ExtensionPoint(label='track_actions')
+_file_actions = ExtensionPoint(label='file_actions')
 
 
 def register_album_action(action):
@@ -97,7 +129,7 @@ class MainPanel(QtWidgets.QSplitter):
     ]
 
     def __init__(self, window, parent=None):
-        QtWidgets.QSplitter.__init__(self, parent)
+        super().__init__(parent)
         self.window = window
         self.create_icons()
         self.views = [FileTreeView(window, self), AlbumTreeView(window, self)]
@@ -111,24 +143,25 @@ class MainPanel(QtWidgets.QSplitter):
         TreeItem.text_color = self.palette().text().color()
         TreeItem.text_color_secondary = self.palette() \
             .brush(QtGui.QPalette.Disabled, QtGui.QPalette.Text).color()
-        TrackItem.track_colors = {
-            File.NORMAL: config.setting["color_saved"],
+        TrackItem.track_colors = defaultdict(lambda: TreeItem.text_color, {
+            File.NORMAL: interface_colors.get_qcolor('entity_saved'),
             File.CHANGED: TreeItem.text_color,
-            File.PENDING: config.setting["color_pending"],
-            File.ERROR: config.setting["color_error"],
-        }
-        FileItem.file_colors = {
+            File.PENDING: interface_colors.get_qcolor('entity_pending'),
+            File.ERROR: interface_colors.get_qcolor('entity_error'),
+        })
+        FileItem.file_colors = defaultdict(lambda: TreeItem.text_color, {
             File.NORMAL: TreeItem.text_color,
-            File.CHANGED: config.setting["color_modified"],
-            File.PENDING: config.setting["color_pending"],
-            File.ERROR: config.setting["color_error"],
-        }
+            File.CHANGED: TreeItem.text_color,
+            File.PENDING: interface_colors.get_qcolor('entity_pending'),
+            File.ERROR: interface_colors.get_qcolor('entity_error'),
+        })
 
     def save_state(self):
         config.persist["splitter_state"] = self.saveState()
         for view in self.views:
             view.save_state()
 
+    @restore_method
     def restore_state(self):
         self.restoreState(config.persist["splitter_state"])
 
@@ -146,6 +179,7 @@ class MainPanel(QtWidgets.QSplitter):
         TrackItem.icon_audio = QtGui.QIcon(":/images/track-audio.png")
         TrackItem.icon_video = QtGui.QIcon(":/images/track-video.png")
         TrackItem.icon_data = QtGui.QIcon(":/images/track-data.png")
+        TrackItem.icon_error = icontheme.lookup('dialog-error', icontheme.ICON_SIZE_MENU)
         FileItem.icon_file = QtGui.QIcon(":/images/file.png")
         FileItem.icon_file_pending = QtGui.QIcon(":/images/file-pending.png")
         FileItem.icon_error = icontheme.lookup('dialog-error', icontheme.ICON_SIZE_MENU)
@@ -213,15 +247,8 @@ class MainPanel(QtWidgets.QSplitter):
 
 class BaseTreeView(QtWidgets.QTreeWidget):
 
-    options = [
-        config.Option("setting", "color_modified", QtGui.QColor(QtGui.QPalette.WindowText)),
-        config.Option("setting", "color_saved", QtGui.QColor(0, 128, 0)),
-        config.Option("setting", "color_error", QtGui.QColor(200, 0, 0)),
-        config.Option("setting", "color_pending", QtGui.QColor(128, 128, 128)),
-    ]
-
     def __init__(self, window, parent=None):
-        QtWidgets.QTreeWidget.__init__(self, parent)
+        super().__init__(parent)
         self.window = window
         self.panel = parent
 
@@ -330,34 +357,44 @@ class BaseTreeView(QtWidgets.QTreeWidget):
 
                     versions = obj.release_group.versions
 
-                    albumtracks = obj.get_num_total_files() if obj.get_num_total_files() else len(obj.tracks)
+                    album_tracks_count = obj.get_num_total_files() or len(obj.tracks)
                     preferred_countries = set(config.setting["preferred_release_countries"])
                     preferred_formats = set(config.setting["preferred_release_formats"])
-                    matches = ("trackmatch", "countrymatch", "formatmatch")
-                    priorities = {}
-                    for version in versions:
-                        priority = {
-                            "trackmatch": "0" if version['totaltracks'] == albumtracks else "?",
-                            "countrymatch": "0" if len(preferred_countries) == 0 or preferred_countries & set(version['countries']) else "?",
-                            "formatmatch": "0" if len(preferred_formats) == 0 or preferred_formats & set(version['formats']) else "?",
-                        }
-                        priorities[version['id']] = "".join(priority[k] for k in matches)
-                    versions.sort(key=lambda version: priorities[version['id']] + version['name'])
+                    ORDER_BEFORE, ORDER_AFTER = 0, 1
 
-                    priority = normal = False
+                    alternatives = []
                     for version in versions:
-                        if not normal and "?" in priorities[version['id']]:
-                            if priority:
+                        trackmatch = countrymatch = formatmatch = ORDER_BEFORE
+                        if version['totaltracks'] != album_tracks_count:
+                            trackmatch = ORDER_AFTER
+                        if preferred_countries:
+                            countries = set(version['countries'])
+                            if not countries or not countries.intersection(preferred_countries):
+                                countrymatch = ORDER_AFTER
+                        if preferred_formats:
+                            formats = set(version['formats'])
+                            if not formats or not formats.intersection(preferred_formats):
+                                formatmatch = ORDER_AFTER
+                        group = (trackmatch, countrymatch, formatmatch)
+                        # order by group, name, and id on push
+                        heappush(alternatives, (group, version['name'], version['id']))
+
+                    prev_group = None
+                    while alternatives:
+                        group, action_text, release_id = heappop(alternatives)
+                        if group != prev_group:
+                            if prev_group is not None:
                                 releases_menu.addSeparator()
-                            normal = True
-                        else:
-                            priority = True
-                        action = releases_menu.addAction(version["name"])
+                            prev_group = group
+                        action = releases_menu.addAction(action_text)
                         action.setCheckable(True)
-                        if obj.id == version["id"]:
+                        if obj.id == release_id:
                             action.setChecked(True)
-                        action.triggered.connect(partial(obj.switch_release_version, version["id"]))
+                        action.triggered.connect(partial(obj.switch_release_version, release_id))
 
+                    versions_count = len(versions)
+                    if versions_count > 1:
+                        releases_menu.setTitle(_("&Other versions (%d)") % versions_count)
                 if obj.release_group.loaded:
                     _add_other_versions()
                 else:
@@ -376,16 +413,21 @@ class BaseTreeView(QtWidgets.QTreeWidget):
 
         # Using type here is intentional. isinstance will return true for the
         # NatAlbum instance, which can't be part of a collection.
+        # pylint: disable=C0123
         selected_albums = [a for a in self.window.selected_objects if type(a) == Album]
         if selected_albums:
             if not bottom_separator:
                 menu.addSeparator()
             menu.addMenu(CollectionMenu(selected_albums, _("Collections"), menu))
 
+        scripts = config.setting["list_of_scripts"]
+
+        if plugin_actions or scripts:
+            menu.addSeparator()
+
         if plugin_actions:
             plugin_menu = QtWidgets.QMenu(_("P&lugins"), menu)
             plugin_menu.setIcon(self.panel.icon_plugins)
-            menu.addSeparator()
             menu.addMenu(plugin_menu)
 
             plugin_menus = {}
@@ -399,6 +441,11 @@ class BaseTreeView(QtWidgets.QTreeWidget):
                         action_menu = plugin_menus[key] = action_menu.addMenu(key[-1])
                 action_menu.addAction(action)
 
+        if scripts:
+            scripts_menu = ScriptsMenu(scripts, _("&Run scripts"), menu)
+            scripts_menu.setIcon(self.panel.icon_plugins)
+            menu.addMenu(scripts_menu)
+
         if isinstance(obj, Cluster) or isinstance(obj, ClusterList) or isinstance(obj, Album):
             menu.addSeparator()
             menu.addAction(self.expand_all_action)
@@ -408,6 +455,7 @@ class BaseTreeView(QtWidgets.QTreeWidget):
         menu.exec_(event.globalPos())
         event.accept()
 
+    @restore_method
     def restore_state(self):
         sizes = config.persist[self.view_sizes.name]
         header = self.header()
@@ -420,7 +468,7 @@ class BaseTreeView(QtWidgets.QTreeWidget):
 
     def save_state(self):
         cols = range(self.numHeaderSections - 1)
-        sizes = " ".join(string_(self.header().sectionSize(i)) for i in cols)
+        sizes = " ".join(str(self.header().sectionSize(i)) for i in cols)
         config.persist[self.view_sizes.name] = sizes
 
     def supportedDropActions(self):
@@ -443,6 +491,11 @@ class BaseTreeView(QtWidgets.QTreeWidget):
         if items:
             drag = QtGui.QDrag(self)
             drag.setMimeData(self.mimeData(items))
+            # Render the first selected element as drag representation
+            rectangle = self.visualItemRect(items[0])
+            pixmap = QtGui.QPixmap(rectangle.width(), rectangle.height())
+            self.viewport().render(pixmap, QtCore.QPoint(), QtGui.QRegion(rectangle))
+            drag.setPixmap(pixmap)
             drag.exec_(QtCore.Qt.MoveAction)
 
     def mimeData(self, items):
@@ -453,7 +506,7 @@ class BaseTreeView(QtWidgets.QTreeWidget):
         for item in items:
             obj = item.obj
             if isinstance(obj, Album):
-                album_ids.append(string_(obj.id))
+                album_ids.append(obj.id)
             elif obj.iterfiles:
                 files.extend([url(f.filename) for f in obj.iterfiles()])
         mimeData = QtCore.QMimeData()
@@ -461,6 +514,14 @@ class BaseTreeView(QtWidgets.QTreeWidget):
         if files:
             mimeData.setUrls(files)
         return mimeData
+
+    def scrollTo(self, index, scrolltype=QtWidgets.QAbstractItemView.EnsureVisible):
+        # QTreeView.scrollTo resets the horizontal scroll position to 0.
+        # Reimplemented to maintain current horizontal scroll position.
+        hscrollbar = self.horizontalScrollBar()
+        xpos = hscrollbar.value()
+        super().scrollTo(index, scrolltype)
+        hscrollbar.setValue(xpos)
 
     @staticmethod
     def drop_urls(urls, target):
@@ -504,6 +565,8 @@ class BaseTreeView(QtWidgets.QTreeWidget):
                 item = parent.child(index)
             if item is not None:
                 target = item.obj
+        if isinstance(self, FileTreeView) and target is None:
+            target = self.tagger.unclustered_files
         log.debug("Drop target = %r", target)
         handled = False
         # text/uri-list
@@ -514,9 +577,7 @@ class BaseTreeView(QtWidgets.QTreeWidget):
         # application/picard.album-list
         albums = data.data("application/picard.album-list")
         if albums:
-            if isinstance(self, FileTreeView) and target is None:
-                target = self.tagger.unclustered_files
-            albums = [self.tagger.load_album(id) for id in string_(albums).split("\n")]
+            albums = [self.tagger.load_album(id) for id in bytes(albums).decode().split("\n")]
             self.tagger.move_files(self.tagger.get_files_from_objects(albums), target)
             handled = True
         return handled
@@ -551,7 +612,7 @@ class FileTreeView(BaseTreeView):
     view_sizes = config.TextOption("persist", "file_view_sizes", "250 40 100")
 
     def __init__(self, window, parent=None):
-        BaseTreeView.__init__(self, window, parent)
+        super().__init__(window, parent)
         self.setAccessibleName(_("file view"))
         self.setAccessibleDescription(_("Contains unmatched files and clusters"))
         self.unmatched_files = ClusterItem(self.tagger.unclustered_files, False, self)
@@ -581,7 +642,7 @@ class AlbumTreeView(BaseTreeView):
     view_sizes = config.TextOption("persist", "album_view_sizes", "250 40 100")
 
     def __init__(self, window, parent=None):
-        BaseTreeView.__init__(self, window, parent)
+        super().__init__(window, parent)
         self.setAccessibleName(_("album view"))
         self.setAccessibleDescription(_("Contains albums and matched files"))
         self.tagger.album_added.connect(self.add_album)
@@ -604,28 +665,30 @@ class AlbumTreeView(BaseTreeView):
 
 class TreeItem(QtWidgets.QTreeWidgetItem):
 
-    __lt__ = lambda self, other: False
-
     def __init__(self, obj, sortable, *args):
-        QtWidgets.QTreeWidgetItem.__init__(self, *args)
+        super().__init__(*args)
         self.obj = obj
         if obj is not None:
             obj.item = self
-        if sortable:
-            self.__lt__ = self._lt
+        self.sortable = sortable
         self.setTextAlignment(1, QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
 
-    def _lt(self, other):
+    def __lt__(self, other):
+        if not self.sortable:
+            return False
         column = self.treeWidget().sortColumn()
+        return self.sortkey(column) < other.sortkey(column)
+
+    def sortkey(self, column):
         if column == 1:
-            return (self.obj.metadata.length or 0) < (other.obj.metadata.length or 0)
-        return self.text(column).lower() < other.text(column).lower()
+            return self.obj.metadata.length or 0
+        return natsort.natkey(self.text(column).lower())
 
 
 class ClusterItem(TreeItem):
 
     def __init__(self, *args):
-        TreeItem.__init__(self, *args)
+        super().__init__(*args)
         self.setIcon(0, ClusterItem.icon_dir)
 
     def update(self):
@@ -664,17 +727,21 @@ class AlbumItem(TreeItem):
 
     def update(self, update_tracks=True):
         album = self.obj
+        selection_changed = self.isSelected()
         if update_tracks:
             oldnum = self.childCount() - 1
             newnum = len(album.tracks)
             if oldnum > newnum:  # remove old items
                 for i in range(oldnum - newnum):
-                    self.takeChild(newnum - 1)
+                    item = self.child(newnum)
+                    selection_changed |= item.isSelected()
+                    self.takeChild(newnum)
                 oldnum = newnum
             # update existing items
             for i in range(oldnum):
                 item = self.child(i)
                 track = album.tracks[i]
+                selection_changed |= item.isSelected() and item.obj != track
                 item.obj = track
                 track.item = item
                 item.update(update_album=False)
@@ -706,8 +773,11 @@ class AlbumItem(TreeItem):
                 self.setToolTip(0, _("Album unchanged"))
         for i, column in enumerate(MainPanel.columns):
             self.setText(i, album.column(column[1]))
-        if self.isSelected():
-            TreeItem.window.update_selection()
+        if selection_changed:
+            TreeItem.window.panel.update_current_view()
+        # Workaround for PICARD-1446: Expand/collapse indicator for the release
+        # is briefly missing on Windows
+        self.emitDataChanged()
 
 
 class TrackItem(TreeItem):
@@ -722,6 +792,7 @@ class TrackItem(TreeItem):
             icon = FileItem.decide_file_icon(file)
             self.setToolTip(0, _(FileItem.decide_file_icon_info(file)))
             self.takeChildren()
+            self.setExpanded(False)
         else:
             self.setToolTip(0, "")
             if track.ignored_for_completeness():
@@ -756,7 +827,11 @@ class TrackItem(TreeItem):
                         items.append(item)
                     self.addChildren(items)
             self.setExpanded(True)
-        self.setIcon(0, icon)
+        if track.error:
+            self.setIcon(0, TrackItem.icon_error)
+            self.setToolTip(0, track.error)
+        else:
+            self.setIcon(0, icon)
         for i, column in enumerate(MainPanel.columns):
             self.setText(i, track.column(column[1]))
             self.setForeground(i, color)

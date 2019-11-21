@@ -18,8 +18,11 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 
 
+from picard.coverart.image import (
+    CaaCoverArtImage,
+    CaaThumbnailCoverArtImage,
+)
 from picard.coverart.providers.caa import CoverArtProviderCaa
-from picard.coverart.image import CaaCoverArtImage, CaaThumbnailCoverArtImage
 
 
 class CaaCoverArtImageRg(CaaCoverArtImage):
@@ -44,8 +47,7 @@ class CoverArtProviderCaaReleaseGroup(CoverArtProviderCaa):
     coverartimage_thumbnail_class = CaaThumbnailCoverArtImageRg
 
     def enabled(self):
-        return (super(CoverArtProviderCaa, self).enabled()
-                and not self.coverart.front_image_found)
+        return not self.coverart.front_image_found
 
     @property
     def _caa_path(self):

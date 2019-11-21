@@ -17,21 +17,26 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 
-import traceback
 from collections import defaultdict
 from functools import partial
 from itertools import combinations
+import traceback
+
 from picard import log
-from picard.metadata import Metadata
 from picard.dataobj import DataObject
-from picard.mbjson import media_formats_from_node, label_info_from_node, country_list_from_node
+from picard.mbjson import (
+    countries_from_node,
+    label_info_from_node,
+    media_formats_from_node,
+)
+from picard.metadata import Metadata
 from picard.util import uniqify
 
 
 class ReleaseGroup(DataObject):
 
     def __init__(self, rg_id):
-        DataObject.__init__(self, rg_id)
+        super().__init__(rg_id)
         self.metadata = Metadata()
         self.loaded = False
         self.versions = []
@@ -64,11 +69,16 @@ class ReleaseGroup(DataObject):
         except (TypeError, KeyError):
             releases = []
 
+        max_tracks = 10
         for node in releases:
             labels, catnums = label_info_from_node(node['label-info'])
 
-            countries = country_list_from_node(node)
+            countries = countries_from_node(node)
 
+            if len(node['media']) > max_tracks:
+                tracks = "+".join([str(m['track-count']) for m in node['media'][:max_tracks]]) + '+…'
+            else:
+                tracks = "+".join([str(m['track-count']) for m in node['media']])
             formats = []
             for medium in node['media']:
                 if "format" in medium:
@@ -77,25 +87,14 @@ class ReleaseGroup(DataObject):
                 "id":      node['id'],
                 "year":    node['date'][:4] if "date" in node else "????",
                 "country": "+".join(countries) if countries
-                    else node['country'] if "country" in node
-                    else "??",
+                           else node.get('country', '') or "??",
                 "format":  media_formats_from_node(node['media']),
                 "label":  ", ".join([' '.join(x.split(' ')[:2]) for x in set(labels)]),
                 "catnum": ", ".join(set(catnums)),
-                "tracks":  "+".join([str(m['track-count']) for m in node['media']]),
-                "barcode":
-                    node['barcode']
-                    if "barcode" in node
-                    and node['barcode'] != ""
-                    else _("[no barcode]"),
-                "packaging":
-                    node['packaging']
-                    if "packaging" in node
-                    else None,
-                "disambiguation":
-                    node['disambiguation']
-                    if "disambiguation" in node
-                    else None,
+                "tracks": tracks,
+                "barcode": node.get('barcode', '') or _('[no barcode]'),
+                "packaging": node.get('packaging', '') or '??',
+                "disambiguation": node.get('disambiguation', ''),
                 "_disambiguate_name": list(),
                 "totaltracks": sum([m['track-count'] for m in node['media']]),
                 "countries": countries,
@@ -139,7 +138,7 @@ class ReleaseGroup(DataObject):
             else:
                 try:
                     self._parse_versions(document)
-                except:
+                except BaseException:
                     error = True
                     log.error(traceback.format_exc())
         finally:

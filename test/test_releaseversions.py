@@ -1,12 +1,14 @@
 import json
 import os.path
-import unittest
 import shutil
 import sys
 import tempfile
+
+from test.picardtestcase import PicardTestCase
+
 from picard import config
-from picard.releasegroup import ReleaseGroup
 from picard.i18n import setup_gettext
+from picard.releasegroup import ReleaseGroup
 
 
 settings = {
@@ -17,7 +19,7 @@ settings = {
 }
 
 
-class ReleaseTest(unittest.TestCase):
+class ReleaseTest(PicardTestCase):
 
     @staticmethod
     def load_data(filename):
@@ -25,6 +27,7 @@ class ReleaseTest(unittest.TestCase):
             return json.load(f)
 
     def setUp(self):
+        super().setUp()
         # we are using temporary locales for tests
         self.tmp_path = tempfile.mkdtemp()
         if sys.hexversion >= 0x020700F0:
@@ -37,7 +40,7 @@ class ReleaseTest(unittest.TestCase):
             shutil.rmtree(self.tmp_path)
 
     def test_1(self):
-        config.setting = settings
+        config.setting = settings.copy()
         rlist = self.load_data('release_group_2.json')
         r = ReleaseGroup(1)
         r._parse_versions(rlist)
@@ -49,7 +52,7 @@ class ReleaseTest(unittest.TestCase):
                          '5 / 2009 / GB / CD / label A / cat 123 / Digipak / specialx')
 
     def test_2(self):
-        config.setting = settings
+        config.setting = settings.copy()
         rlist = self.load_data('release_group_3.json')
         r = ReleaseGroup(1)
         r._parse_versions(rlist)
@@ -59,7 +62,7 @@ class ReleaseTest(unittest.TestCase):
                          '5 / 2011 / FR / CD / label A / cat 123')
 
     def test_3(self):
-        config.setting = settings
+        config.setting = settings.copy()
         rlist = self.load_data('release_group_4.json')
         r = ReleaseGroup(1)
         r._parse_versions(rlist)

@@ -58,6 +58,12 @@
     <layout class="QHBoxLayout" name="horizontalLayout">
      <item>
       <widget class="QLabel" name="label">
+       <property name="sizePolicy">
+        <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
+         <horstretch>0</horstretch>
+         <verstretch>0</verstretch>
+        </sizepolicy>
+       </property>
        <property name="text">
         <string>Only use images of the following size:</string>
        </property>
@@ -67,6 +73,9 @@
       <spacer name="horizontalSpacer">
        <property name="orientation">
         <enum>Qt::Horizontal</enum>
+       </property>
+       <property name="sizeType">
+        <enum>QSizePolicy::Ignored</enum>
        </property>
        <property name="sizeHint" stdset="0">
         <size>
@@ -84,21 +93,6 @@
          <verstretch>0</verstretch>
         </sizepolicy>
        </property>
-       <item>
-        <property name="text">
-         <string>250 px</string>
-        </property>
-       </item>
-       <item>
-        <property name="text">
-         <string>500 px</string>
-        </property>
-       </item>
-       <item>
-        <property name="text">
-         <string>Full size</string>
-        </property>
-       </item>
       </widget>
      </item>
     </layout>
@@ -145,6 +139,14 @@
    </item>
   </layout>
  </widget>
+ <tabstops>
+  <tabstop>restrict_images_types</tabstop>
+  <tabstop>select_caa_types</tabstop>
+  <tabstop>cb_image_size</tabstop>
+  <tabstop>cb_save_single_front_image</tabstop>
+  <tabstop>cb_approved_only</tabstop>
+  <tabstop>cb_type_as_filename</tabstop>
+ </tabstops>
  <resources/>
  <connections/>
 </ui>

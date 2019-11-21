@@ -17,16 +17,23 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 
-from PyQt5 import QtCore, QtWidgets
+from PyQt5 import (
+    QtCore,
+    QtWidgets,
+)
+
 from picard.util.tags import TAG_NAMES
+
 from picard.ui import PicardDialog
 from picard.ui.ui_edittagdialog import Ui_EditTagDialog
 
 
 class EditTagDialog(PicardDialog):
 
+    autorestore = False
+
     def __init__(self, window, tag):
-        PicardDialog.__init__(self, window)
+        super().__init__(window)
         self.ui = Ui_EditTagDialog()
         self.ui.setupUi(self)
         self.window = window
@@ -39,8 +46,7 @@ class EditTagDialog(PicardDialog):
             set(list(TAG_NAMES.keys()) + self.metadata_box.tag_diff.tag_names))
         if len(self.metadata_box.files) == 1:
             current_file = list(self.metadata_box.files)[0]
-            self.default_tags = list(filter(lambda x: current_file.supports_tag(x),
-                                            self.default_tags))
+            self.default_tags = list(filter(current_file.supports_tag, self.default_tags))
         tag_names = self.ui.tag_names
         tag_names.editTextChanged.connect(self.tag_changed)
         tag_names.addItem("")
@@ -56,6 +62,7 @@ class EditTagDialog(PicardDialog):
         self.ui.remove_value.clicked.connect(self.remove_value)
         self.value_list.itemChanged.connect(self.value_edited)
         self.value_list.itemSelectionChanged.connect(self.value_selection_changed)
+        self.restore_geometry()
 
     def edit_value(self):
         item = self.value_list.currentItem()
@@ -90,6 +97,8 @@ class EditTagDialog(PicardDialog):
     def tag_changed(self, tag):
         tag_names = self.ui.tag_names
         tag_names.editTextChanged.disconnect(self.tag_changed)
+        line_edit = tag_names.lineEdit()
+        cursor_pos = line_edit.cursorPosition()
         flags = QtCore.Qt.MatchFixedString | QtCore.Qt.MatchCaseSensitive
 
         # if the previous tag was new and has no value, remove it from the QComboBox.
@@ -98,7 +107,7 @@ class EditTagDialog(PicardDialog):
             tag_names.removeItem(tag_names.findText(self.tag, flags))
 
         row = tag_names.findText(tag, flags)
-        self.tag = string_(tag)
+        self.tag = tag
         if row <= 0:
             if tag:
                 # add custom tags to the QComboBox immediately
@@ -114,6 +123,7 @@ class EditTagDialog(PicardDialog):
 
         self.enable_all()
         tag_names.setCurrentIndex(row)
+        line_edit.setCursorPosition(cursor_pos)
         self.value_list.clear()
 
         values = self.modified_tags.get(self.tag, None)
@@ -163,7 +173,7 @@ class EditTagDialog(PicardDialog):
 
     def _modified_tag(self):
         return self.modified_tags.setdefault(self.tag,
-               list(self.metadata_box.tag_diff.new[self.tag]) or [""])
+                                             list(self.metadata_box.tag_diff.new[self.tag]) or [""])
 
     def accept(self):
         self.window.ignore_selection_changes = True
@@ -176,4 +186,4 @@ class EditTagDialog(PicardDialog):
             obj.update()
         self.window.ignore_selection_changes = False
         self.window.update_selection()
-        QtWidgets.QDialog.accept(self)
+        super().accept()

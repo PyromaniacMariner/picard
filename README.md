@@ -3,6 +3,7 @@ MusicBrainz Picard
 [![Travis Status](https://img.shields.io/travis/metabrainz/picard/master.svg?style=flat-square&label=Travis)](https://travis-ci.org/metabrainz/picard)
 [![Codacy Grade](https://img.shields.io/codacy/grade/53a33607234a4c18a11a6207d1173c0c/master.svg?style=flat-square&label=Codacy)](https://www.codacy.com/app/MetaBrainz/picard)
 [![AppVeyor Status](https://img.shields.io/appveyor/ci/metabrainz/picard/master.svg?style=flat-square&label=AppVeyor)](https://ci.appveyor.com/project/MetaBrainz/picard)
+[![CircleCI](https://circleci.com/gh/metabrainz/picard.svg?style=svg)](https://circleci.com/gh/metabrainz/picard)
 
 [MusicBrainz Picard](http://picard.musicbrainz.org) is a cross-platform (Linux/Mac OS X/Windows) application written in Python and is the official [MusicBrainz](http://musicbrainz.org) tagger.
 
@@ -18,3 +19,8 @@ Support and issue reporting
 ---------------------------
 
 Please report all bugs and feature requests in the [MusicBrainz issue tracker](https://tickets.metabrainz.org/browse/PICARD). If you need support in using Picard please read the [documentation](https://picard.musicbrainz.org/docs/) first and have a look at the [MusicBrainz community forums](https://community.metabrainz.org/c/picard).
+
+Installing
+---------------------------
+
+[INSTALL.md has instructions on building this codebase.](INSTALL.md)

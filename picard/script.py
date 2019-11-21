@@ -20,13 +20,18 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 
-import re
-import operator
-from functools import reduce
 from collections import namedtuple
+from functools import reduce
 from inspect import getfullargspec
-from picard.metadata import Metadata
-from picard.metadata import MULTI_VALUED_JOINER
+import operator
+import re
+import unicodedata
+
+from picard import config
+from picard.metadata import (
+    MULTI_VALUED_JOINER,
+    Metadata,
+)
 from picard.plugin import ExtensionPoint
 from picard.util import uniqify
 
@@ -35,19 +40,19 @@ class ScriptError(Exception):
     pass
 
 
-class ParseError(ScriptError):
+class ScriptParseError(ScriptError):
     pass
 
 
-class EndOfFile(ParseError):
+class ScriptEndOfFile(ScriptParseError):
     pass
 
 
-class SyntaxError(ParseError):
+class ScriptSyntaxError(ScriptParseError):
     pass
 
 
-class UnknownFunction(ScriptError):
+class ScriptUnknownFunction(ScriptError):
     pass
 
 
@@ -55,6 +60,12 @@ class ScriptText(str):
 
     def eval(self, state):
         return self
+
+
+def normalize_tagname(name):
+    if name.startswith('_'):
+        return "~" + name[1:]
+    return name
 
 
 class ScriptVariable(object):
@@ -66,10 +77,7 @@ class ScriptVariable(object):
         return '<ScriptVariable %%%s%%>' % self.name
 
     def eval(self, state):
-        name = self.name
-        if name.startswith("_"):
-            name = "~" + name[1:]
-        return state.context.get(name, "")
+        return state.context.get(normalize_tagname(self.name), "")
 
 
 FunctionRegistryItem = namedtuple("FunctionRegistryItem",
@@ -84,20 +92,25 @@ class ScriptFunction(object):
         try:
             argnum_bound = parser.functions[name].argcount
             argcount = len(args)
-            if argnum_bound and not (argnum_bound.lower <= argcount
-                                     and (argnum_bound.upper is None
-                                          or len(args) <= argnum_bound.upper)):
-                raise ScriptError(
-                    "Wrong number of arguments for $%s: Expected %s, got %i at position %i, line %i"
-                    % (name,
-                       string_(argnum_bound.lower)
-                        if argnum_bound.upper is None
-                        else "%i - %i" % (argnum_bound.lower, argnum_bound.upper),
-                       argcount,
-                       parser._x,
-                       parser._y))
+            if argnum_bound:
+                too_few_args = argcount < argnum_bound.lower
+                if argnum_bound.upper is not None:
+                    if argnum_bound.lower == argnum_bound.upper:
+                        expected = "exactly %i" % argnum_bound.lower
+                    else:
+                        expected = "between %i and %i" % (argnum_bound.lower, argnum_bound.upper)
+                    too_many_args = argcount > argnum_bound.upper
+                else:
+                    expected = "at least %i" % argnum_bound.lower
+                    too_many_args = False
+
+                if too_few_args or too_many_args:
+                    raise ScriptError(
+                        "Wrong number of arguments for $%s: Expected %s, got %i at position %i, line %i"
+                        % (name, expected, argcount, parser._x, parser._y)
+                    )
         except KeyError:
-            raise UnknownFunction("Unknown function '%s'" % name)
+            raise ScriptUnknownFunction("Unknown function '%s'" % name)
 
         self.name = name
         self.args = args
@@ -106,7 +119,11 @@ class ScriptFunction(object):
         return "<ScriptFunction $%s(%r)>" % (self.name, self.args)
 
     def eval(self, parser):
-        function, eval_args, num_args = parser.functions[self.name]
+        try:
+            function, eval_args, num_args = parser.functions[self.name]
+        except KeyError:
+            raise ScriptUnknownFunction("Unknown function '%s'" % self.name)
+
         if eval_args:
             args = [arg.eval(parser) for arg in self.args]
         else:
@@ -117,10 +134,7 @@ class ScriptFunction(object):
 class ScriptExpression(list):
 
     def eval(self, state):
-        result = []
-        for item in self:
-            result.append(item.eval(state))
-        return "".join(result)
+        return "".join([item.eval(state) for item in self])
 
 
 def isidentif(ch):
@@ -141,17 +155,17 @@ Grammar:
   argument   ::= (variable | function | argtext)*
 """
 
-    _function_registry = ExtensionPoint()
+    _function_registry = ExtensionPoint(label='function_registry')
     _cache = {}
 
     def __raise_eof(self):
-        raise EndOfFile("Unexpected end of script at position %d, line %d" % (self._x, self._y))
+        raise ScriptEndOfFile("Unexpected end of script at position %d, line %d" % (self._x, self._y))
 
     def __raise_char(self, ch):
         #line = self._text[self._line:].split("\n", 1)[0]
         #cursor = " " * (self._pos - self._line - 1) + "^"
-        #raise SyntaxError("Unexpected character '%s' at position %d, line %d\n%s\n%s" % (ch, self._x, self._y, line, cursor))
-        raise SyntaxError("Unexpected character '%s' at position %d, line %d" % (ch, self._x, self._y))
+        #raise ScriptSyntaxError("Unexpected character '%s' at position %d, line %d\n%s\n%s" % (ch, self._x, self._y, line, cursor))
+        raise ScriptSyntaxError("Unexpected character '%s' at position %d, line %d" % (ch, self._x, self._y))
 
     def read(self):
         try:
@@ -194,7 +208,7 @@ Grammar:
             if ch == '(':
                 name = self._text[start:self._pos-1]
                 if name not in self.functions:
-                    raise UnknownFunction("Unknown function '%s'" % name)
+                    raise ScriptUnknownFunction("Unknown function '%s'" % name)
                 return ScriptFunction(name, self.parse_arguments(), self)
             elif ch is None:
                 self.__raise_eof()
@@ -284,6 +298,14 @@ Grammar:
         return ScriptParser._cache[key].eval(self)
 
 
+def enabled_tagger_scripts_texts():
+    """Returns an iterator over the enabled tagger scripts.
+    For each script, you'll get a tuple consisting of the script name and text"""
+    if not config.setting["enable_tagger_scripts"]:
+        return []
+    return [(s_name, s_text) for _s_pos, s_name, s_enabled, s_text in config.setting["list_of_scripts"] if s_enabled and s_text]
+
+
 def register_script_function(function, name=None, eval_args=True,
                              check_argcount=True):
     """Registers a script function. If ``name`` is ``None``,
@@ -311,14 +333,14 @@ def register_script_function(function, name=None, eval_args=True,
         name = function.__name__
     ScriptParser._function_registry.register(function.__module__,
         (name, FunctionRegistryItem(
-                    function, eval_args,
-                    argcount if argcount and check_argcount else False)
+            function, eval_args,
+            argcount if argcount and check_argcount else False)
          )
     )
 
 
 def _compute_int(operation, *args):
-    return string_(reduce(operation, map(int, args)))
+    return str(reduce(operation, map(int, args)))
 
 
 def _compute_logic(operation, *args):
@@ -331,18 +353,14 @@ def _get_multi_values(parser, multi, separator):
 
     if separator == MULTI_VALUED_JOINER:
         # Convert ScriptExpression containing only a single variable into variable
-        if (isinstance(multi, ScriptExpression) and
-                len(multi) == 1 and
-                isinstance(multi[0], ScriptVariable)):
+        if (isinstance(multi, ScriptExpression)
+            and len(multi) == 1
+            and isinstance(multi[0], ScriptVariable)):
             multi = multi[0]
 
         # If a variable, return multi-values
         if isinstance(multi, ScriptVariable):
-            if multi.name.startswith("_"):
-                name = "~" + multi.name[1:]
-            else:
-                name = multi.name
-            return parser.context.getall(name)
+            return parser.context.getall(normalize_tagname(multi.name))
 
     # Fall-back to converting to a string and splitting if haystack is an expression
     # or user has overridden the separator character.
@@ -432,11 +450,17 @@ def func_inmulti(parser, haystack, needle, separator=MULTI_VALUED_JOINER):
 
 
 def func_rreplace(parser, text, old, new):
-    return re.sub(old, new, text)
+    try:
+        return re.sub(old, new, text)
+    except re.error:
+        return text
 
 
 def func_rsearch(parser, text, pattern):
-    match = re.search(pattern, text)
+    try:
+        match = re.search(pattern, text)
+    except re.error:
+        return ""
     if match:
         try:
             return match.group(1)
@@ -447,20 +471,19 @@ def func_rsearch(parser, text, pattern):
 
 def func_num(parser, text, length):
     try:
-        format = "%%0%dd" % min(int(length), 20)
+        format_ = "%%0%dd" % min(int(length), 20)
     except ValueError:
         return ""
     try:
         value = int(text)
     except ValueError:
         value = 0
-    return format % value
+    return format_ % value
 
 
 def func_unset(parser, name):
     """Unsets the variable ``name``."""
-    if name.startswith("_"):
-        name = "~" + name[1:]
+    name = normalize_tagname(name)
     # Allow wild-card unset for certain keys
     if name in ('performer:*', 'comment:*', 'lyrics:*'):
         name = name[:-1]
@@ -475,12 +498,20 @@ def func_unset(parser, name):
     return ""
 
 
+def func_delete(parser, name):
+    """
+    Deletes the variable ``name``.
+    This will unset the tag with the given name and also mark the tag for
+    deletion on save.
+    """
+    parser.context.delete(normalize_tagname(name))
+    return ""
+
+
 def func_set(parser, name, value):
     """Sets the variable ``name`` to ``value``."""
     if value:
-        if name.startswith("_"):
-            name = "~" + name[1:]
-        parser.context[name] = value
+        parser.context[normalize_tagname(name)] = value
     else:
         func_unset(parser, name)
     return ""
@@ -493,17 +524,13 @@ def func_setmulti(parser, name, value, separator=MULTI_VALUED_JOINER):
 
 def func_get(parser, name):
     """Returns the variable ``name`` (equivalent to ``%name%``)."""
-    if name.startswith("_"):
-        name = "~" + name[1:]
-    return parser.context.get(name, "")
+    return parser.context.get(normalize_tagname(name), "")
 
 
 def func_copy(parser, new, old):
     """Copies content of variable ``old`` to variable ``new``."""
-    if new.startswith("_"):
-        new = "~" + new[1:]
-    if old.startswith("_"):
-        old = "~" + old[1:]
+    new = normalize_tagname(new)
+    old = normalize_tagname(old)
     parser.context[new] = parser.context.getall(old)[:]
     return ""
 
@@ -511,10 +538,8 @@ def func_copy(parser, new, old):
 def func_copymerge(parser, new, old):
     """Copies content of variable ``old`` and appends it into variable ``new``, removing duplicates. This is normally
     used to merge a multi-valued variable into another, existing multi-valued variable."""
-    if new.startswith("_"):
-        new = "~" + new[1:]
-    if old.startswith("_"):
-        old = "~" + old[1:]
+    new = normalize_tagname(new)
+    old = normalize_tagname(old)
     newvals = parser.context.getall(new)
     oldvals = parser.context.getall(old)
     parser.context[new] = uniqify(newvals + oldvals)
@@ -672,7 +697,7 @@ def func_gte(parser, x, y):
 
 
 def func_len(parser, text=""):
-    return string_(len(text))
+    return str(len(text))
 
 
 def func_lenmulti(parser, multi, separator=MULTI_VALUED_JOINER):
@@ -687,17 +712,21 @@ def func_performer(parser, pattern="", join=", "):
     return join.join(values)
 
 
-def func_matchedtracks(parser, arg):
-    if parser.file and parser.file.parent:
-        return string_(parser.file.parent.album.get_num_matched_tracks())
+def func_matchedtracks(parser, *args):
+    # only works in file naming scripts, always returns zero in tagging scripts
+    file = parser.file
+    if file and file.parent and hasattr(file.parent, 'album'):
+        return str(parser.file.parent.album.get_num_matched_tracks())
     return "0"
 
 
 def func_is_complete(parser):
-    if (parser.file and parser.file.parent
-        and parser.file.parent.album.is_complete()):
+    # only works in file naming scripts, always returns zero in tagging scripts
+    file = parser.file
+    if (file and file.parent and hasattr(file.parent, 'album')
+            and file.parent.album.is_complete()):
         return "1"
-    return "0"
+    return ""
 
 
 def func_firstalphachar(parser, text="", nonalpha="#"):
@@ -730,19 +759,19 @@ def func_firstwords(parser, text, length):
 def func_startswith(parser, text, prefix):
     if text.startswith(prefix):
         return "1"
-    return "0"
+    return ""
 
 
 def func_endswith(parser, text, suffix):
     if text.endswith(suffix):
         return "1"
-    return "0"
+    return ""
 
 
 def func_truncate(parser, text, length):
     try:
         length = int(length)
-    except ValueError as e:
+    except ValueError:
         length = None
     return text[:length].rstrip()
 
@@ -781,7 +810,8 @@ def _delete_prefix(parser, text, *prefixes):
     if not prefixes:
         prefixes = ('A', 'The')
     text = text.strip()
-    match = re.match('(' + r'\s+)|('.join(prefixes) + r'\s+)', text)
+    rx = '(' + r'\s+)|('.join(map(re.escape, prefixes)) + r'\s+)'
+    match = re.match(rx, text)
     if match:
         pref = match.group()
         return text[len(pref):], pref.strip()
@@ -829,6 +859,57 @@ def func_ne_any(parser, x, *args):
     return func_not(parser, func_eq_all(parser, x, *args))
 
 
+def func_title(parser, text):
+    # GPL 2.0 licensed code by Javier Kohen, Sambhav Kothari
+    # from https://github.com/metabrainz/picard-plugins/blob/2.0/plugins/titlecase/titlecase.py
+    """
+    Title-case a text - capitalizes first letter of every word
+    like: from "Lost in the Supermarket" to "Lost In The Supermarket"
+    Example: $set(album,$title(%album%))
+    """
+    if not text:
+        return ""
+    capitalized = text[0].capitalize()
+    capital = False
+    for i in range(1, len(text)):
+        t = text[i]
+        if t in "’'" and text[i-1].isalpha():
+            capital = False
+        elif iswbound(t):
+            capital = True
+        elif capital and t.isalpha():
+            capital = False
+            t = t.capitalize()
+        else:
+            capital = False
+        capitalized += t
+    return capitalized
+
+
+def iswbound(char):
+    # GPL 2.0 licensed code by Javier Kohen, Sambhav Kothari
+    # from https://github.com/metabrainz/picard-plugins/blob/2.0/plugins/titlecase/titlecase.py
+    """ Checks whether the given character is a word boundary """
+    category = unicodedata.category(char)
+    return "Zs" == category or "Sk" == category or "P" == category[0]
+
+
+def func_is_audio(parser):
+    """Returns true, if the file processed is an audio file."""
+    if func_is_video(parser) == "1":
+        return ""
+    else:
+        return "1"
+
+
+def func_is_video(parser):
+    """Returns true, if the file processed is a video file."""
+    if parser.context['~video'] and parser.context['~video'] != '0':
+        return "1"
+    else:
+        return ""
+
+
 register_script_function(func_if, "if", eval_args=False)
 register_script_function(func_if2, "if2", eval_args=False)
 register_script_function(func_noop, "noop", eval_args=False)
@@ -843,6 +924,7 @@ register_script_function(func_rreplace, "rreplace")
 register_script_function(func_rsearch, "rsearch")
 register_script_function(func_num, "num")
 register_script_function(func_unset, "unset")
+register_script_function(func_delete, "delete")
 register_script_function(func_set, "set")
 register_script_function(func_setmulti, "setmulti")
 register_script_function(func_get, "get")
@@ -868,7 +950,7 @@ register_script_function(func_copymerge, "copymerge")
 register_script_function(func_len, "len")
 register_script_function(func_lenmulti, "lenmulti", eval_args=False)
 register_script_function(func_performer, "performer")
-register_script_function(func_matchedtracks, "matchedtracks")
+register_script_function(func_matchedtracks, "matchedtracks", eval_args=False)
 register_script_function(func_is_complete, "is_complete")
 register_script_function(func_firstalphachar, "firstalphachar")
 register_script_function(func_initials, "initials")
@@ -882,3 +964,6 @@ register_script_function(func_eq_any, "eq_any", check_argcount=False)
 register_script_function(func_ne_all, "ne_all", check_argcount=False)
 register_script_function(func_eq_all, "eq_all", check_argcount=False)
 register_script_function(func_ne_any, "ne_any", check_argcount=False)
+register_script_function(func_title, "title")
+register_script_function(func_is_audio, "is_audio")
+register_script_function(func_is_video, "is_video")

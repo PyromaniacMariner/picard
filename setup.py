@@ -1,97 +1,45 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-from __future__ import print_function
 import datetime
+from distutils import log
+from distutils.command.build import build
+from distutils.dep_util import newer
+from distutils.spawn import find_executable
 import glob
+from io import StringIO
 import os
 import re
+import stat
 import sys
-import subprocess
-from io import StringIO
+import tempfile
 
-from picard import __version__
+from setuptools import (
+    Command,
+    Extension,
+    setup,
+)
+from setuptools.command.install import install as install
+from setuptools.dist import Distribution
+
+from picard import (
+    PICARD_APP_ID,
+    PICARD_DESKTOP_NAME,
+    PICARD_VERSION,
+    __version__,
+)
+
 
 if sys.version_info < (3, 5):
     sys.exit("ERROR: You need Python 3.5 or higher to use Picard.")
 
-
-args = {}
-
-try:
-    from py2app.build_app import py2app
-    do_py2app = True
-except ImportError:
-    do_py2app = False
-
-# this must be imported *after* py2app, because py2app imports setuptools
-# which "patches" (read: screws up) the Extension class
-from distutils import log
-from distutils.command.build import build
-from distutils.command.install import install as install
-from distutils.dep_util import newer
-from distutils.dist import Distribution
-from distutils.spawn import find_executable
-from setuptools import setup, Command, Extension
-
-
 PACKAGE_NAME = "picard"
+APPDATA_FILE = PICARD_APP_ID + '.appdata.xml'
+APPDATA_FILE_TEMPLATE = APPDATA_FILE + '.in'
 
 ext_modules = [
     Extension('picard.util._astrcmp', sources=['picard/util/_astrcmp.c']),
 ]
-
-py2app_exclude_modules = [
-    'pydoc',
-    'PyQt5.QtDeclarative', 'PyQt5.QtDesigner', 'PyQt5.QtHelp', 'PyQt5.QtMultimedia',
-    'PyQt5.QtOpenGL', 'PyQt5.QtScript', 'PyQt5.QtScriptTools', 'PyQt5.QtSql', 'PyQt5.QtSvg',
-    'PyQt5.QtTest', 'PyQt5.QtWebKit', 'PyQt5.QtXml', 'PyQt5.QtXmlPatterns', 'PyQt5.phonon'
-]
-
-# sockets module, however not excluded from py2exe should not be used in Picard. Instead
-# the QtNetwork module should be used. sockets module was removed from the excluded list
-# to support bundled plugins on platforms it is not available.
-py2exe_exclude_modules = [
-    'select',
-]
-
-exclude_modules = [
-    'ssl', 'bz2',
-    'distutils', 'unittest',
-    'bdb', 'calendar', 'difflib', 'doctest', 'dummy_thread', 'gzip',
-    'optparse', 'pdb', 'plistlib', 'pyexpat', 'quopri', 'repr',
-    'stringio', 'tarfile', 'uu'
-]
-
-if do_py2app:
-    args['app'] = ['tagger.py']
-    args['name'] = 'Picard'
-    args['options'] = { 'py2app' :
-        {
-            'optimize'       : 2,
-            'argv_emulation' : True,
-            'iconfile'       : 'picard.icns',
-            'frameworks'     : ['libiconv.2.dylib', 'libdiscid.0.dylib'],
-            'resources'      : ['locale'],
-            'includes'       : ['json', 'sip', 'PyQt5', 'ntpath'] + [e.name for e in ext_modules],
-            'excludes'  : exclude_modules + py2app_exclude_modules,
-            'plist'     : { 'CFBundleName' : 'MusicBrainz Picard',
-                            'CFBundleGetInfoString' : 'Picard, the next generation MusicBrainz tagger (see https://picard.musicbrainz.org/)',
-                            'CFBundleIdentifier':'org.musicbrainz.picard',
-                            'CFBundleShortVersionString':__version__,
-                            'CFBundleVersion': 'Picard ' + __version__,
-                            'LSMinimumSystemVersion':'10.4.3',
-                            'LSMultipleInstancesProhibited':'true',
-                            # RAK: It biffed when I tried to include your accented characters, luks. :-(
-                            'NSHumanReadableCopyright':'Copyright 2008 Lukas Lalinsky, Robert Kaye',
-                          },
-            'qt_plugins': ['imageformats/libqgif.dylib',
-                           'imageformats/libqjpeg.dylib',
-                           'imageformats/libqtiff.dylib',
-                           'accessible/libqtaccessiblewidgets.dylib']
-        },
-    }
-
 
 tx_executable = find_executable('tx')
 
@@ -120,10 +68,11 @@ class picard_test(Command):
         import unittest
 
         names = []
-        for filename in glob.glob("test/test_*.py"):
-            name = os.path.splitext(os.path.basename(filename))[0]
+        for filename in glob.glob("test/**/test_*.py", recursive=True):
+            modules = os.path.splitext(filename)[0].split(os.sep)
+            name = '.'.join(modules[1:])
             if not self.tests or name in self.tests:
-                names.append("test." + name)
+                names.append('test.' + name)
 
         tests = unittest.defaultTestLoader.loadTestsFromNames(names)
         t = unittest.TextTestRunner(verbosity=self.verbosity)
@@ -157,6 +106,7 @@ class picard_build_locales(Command):
             self.mkpath(path)
             self.spawn(['msgfmt', '-o', mo, po])
 
+
 Distribution.locales = None
 
 
@@ -183,7 +133,7 @@ class picard_install_locales(Command):
                                    ('install_locales', 'install_dir'),
                                    ('force', 'force'),
                                    ('skip_build', 'skip_build'),
-                                  )
+                                   )
 
     def run(self):
         if not self.skip_build:
@@ -203,7 +153,7 @@ class picard_install(install):
         ('install-locales=', None,
          "installation directory for locales"),
         ('localedir=', None, ''),
-        ('disable-autoupdate', None, ''),
+        ('disable-autoupdate', None, 'disable update checking and hide settings for it'),
         ('disable-locales', None, ''),
     ]
 
@@ -219,8 +169,9 @@ class picard_install(install):
     def finalize_options(self):
         install.finalize_options(self)
         if self.install_locales is None:
-            self.install_locales = '$base/share/locale'
-            self._expand_attrs(['install_locales'])
+            self.install_locales = os.path.join(self.install_data, 'share', 'locale')
+            if self.root and self.install_locales.startswith(self.root):
+                self.install_locales = self.install_locales[len(self.root):]
         self.install_locales = os.path.normpath(self.install_locales)
         self.localedir = self.install_locales
         # can't use set_undefined_options :/
@@ -240,14 +191,16 @@ class picard_build(build):
     user_options = build.user_options + [
         ('build-locales=', 'd', "build directory for locale files"),
         ('localedir=', None, ''),
-        ('disable-autoupdate', None, ''),
+        ('disable-autoupdate', None, 'disable update checking and hide settings for it'),
         ('disable-locales', None, ''),
+        ('build-number=', None, 'build number (integer)'),
     ]
 
     sub_commands = build.sub_commands
 
     def initialize_options(self):
         build.initialize_options(self)
+        self.build_number = 0
         self.build_locales = None
         self.localedir = None
         self.disable_autoupdate = None
@@ -255,6 +208,10 @@ class picard_build(build):
 
     def finalize_options(self):
         build.finalize_options(self)
+        try:
+            self.build_number = int(self.build_number)
+        except ValueError:
+            self.build_number = 0
         if self.build_locales is None:
             self.build_locales = os.path.join(self.build_base, 'locale')
         if self.localedir is None:
@@ -265,9 +222,32 @@ class picard_build(build):
             self.sub_commands.append(('build_locales', None))
 
     def run(self):
-        if 'bdist_nsis' not in sys.argv:  # somebody shoot me please
-            log.info('generating scripts/%s from scripts/picard.in', PACKAGE_NAME)
-            generate_file('scripts/picard.in', 'scripts/' + PACKAGE_NAME, {'localedir': self.localedir, 'autoupdate': not self.disable_autoupdate})
+        params = {'localedir': self.localedir, 'autoupdate': not self.disable_autoupdate}
+        generate_file('tagger.py.in', 'tagger.py', params)
+        make_executable('tagger.py')
+        generate_file('scripts/picard.in', 'scripts/' + PACKAGE_NAME, params)
+        if sys.platform == 'win32':
+            file_version = PICARD_VERSION[0:3] + (self.build_number,)
+            file_version_str = '.'.join([str(v) for v in file_version])
+
+            # Temporarily setting it to this value to generate a nice name for Windows app
+            args['name'] = 'MusicBrainz Picard'
+            args['file_version'] = file_version_str
+            if os.path.isfile('installer/picard-setup.nsi.in'):
+                generate_file('installer/picard-setup.nsi.in', 'installer/picard-setup.nsi', args)
+            version_args = {
+                'filevers': str(file_version),
+                'prodvers': str(file_version),
+            }
+            generate_file('win-version-info.txt.in', 'win-version-info.txt', {**args, **version_args})
+            args['name'] = 'picard'
+
+            generate_file('appxmanifest.xml.in', 'appxmanifest.xml', {
+                'app-id': PICARD_APP_ID,
+                'version': file_version_str
+            })
+        elif sys.platform == 'linux':
+            self.run_command('build_appdata')
         build.run(self)
 
 
@@ -334,7 +314,7 @@ class picard_build_ui(Command):
             tmp = StringIO()
             uic.compileUi(uifile, tmp)
             source = tmp.getvalue()
-            rc = re.compile(r'\n\n#.*?(?=\n\n)', re.MULTILINE|re.DOTALL)
+            rc = re.compile(r'\n\n#.*?(?=\n\n)', re.MULTILINE | re.DOTALL)
             comment = ("\n\n# Automatically generated - don't edit.\n"
                        "# Use `python setup.py %s` to update it."
                        % _get_option_name(self))
@@ -383,6 +363,69 @@ class picard_clean_ui(Command):
             log.warn("'%s' does not exist -- can't clean it", pyfile)
 
 
+class picard_build_appdata(Command):
+    description = 'Build appdata metadata file'
+    user_options = []
+
+    re_release = re.compile(r'^# Version (?P<version>\d+(?:\.\d+){1,2}) - (?P<date>\d{4}-\d{2}-\d{2})', re.MULTILINE)
+
+    def initialize_options(self):
+        pass
+
+    def finalize_options(self):
+        pass
+
+    def run(self):
+        with tempfile.NamedTemporaryFile(suffix=APPDATA_FILE) as tmp_file:
+            self.spawn([
+                'msgfmt', '--xml',
+                '--template=%s' % APPDATA_FILE_TEMPLATE,
+                '-d', 'po/appstream',
+                '-o', tmp_file.name,
+            ])
+            self.add_release_list(tmp_file.name)
+
+    def add_release_list(self, source_file):
+        template = '<release date="{date}" version="{version}"/>'
+        with open('NEWS.md', 'r') as newsfile:
+            news = newsfile.read()
+            releases = [template.format(**m.groupdict()) for m in self.re_release.finditer(news)]
+            args = {
+                'app-id': PICARD_APP_ID,
+                'desktop-id': PICARD_DESKTOP_NAME,
+                'releases': '\n    '.join(releases)
+            }
+            generate_file(source_file, APPDATA_FILE, args)
+
+
+class picard_regen_appdata_pot_file(Command):
+    description = 'Regenerate translations from appdata metadata template'
+    user_options = []
+
+    def initialize_options(self):
+        pass
+
+    def finalize_options(self):
+        pass
+
+    def run(self):
+        output_dir = 'po/appstream/'
+        pot_file = os.path.join(output_dir, 'picard-appstream.pot')
+        self.spawn([
+            'xgettext',
+            '--output', pot_file,
+            '--language=appdata',
+            APPDATA_FILE_TEMPLATE,
+        ])
+        for filepath in glob.glob(os.path.join(output_dir, '*.po')):
+            self.spawn([
+                'msgmerge',
+                '--update',
+                filepath,
+                pot_file
+            ])
+
+
 class picard_get_po_files(Command):
     description = "Retrieve po files from transifex"
     minimum_perc_default = 5
@@ -400,14 +443,22 @@ class picard_get_po_files(Command):
     def run(self):
         if tx_executable is None:
             sys.exit('Transifex client executable (tx) not found.')
-        txpull_cmd = [
+        self.spawn([
             tx_executable,
             'pull',
             '--force',
             '--all',
             '--minimum-perc=%d' % self.minimum_perc
-        ]
-        self.spawn(txpull_cmd)
+        ])
+        self.spawn([
+            tx_executable,
+            'pull',
+            '--force',
+            '--resource',
+            'musicbrainz.picard',
+            '--language',
+            'en_AU,en_GB,en_CA'
+        ])
 
 
 _regen_pot_description = "Regenerate po/picard.pot, parsing source tree for new or updated strings"
@@ -456,8 +507,8 @@ except ImportError:
 def _get_option_name(obj):
     """Returns the name of the option for specified Command object"""
     for name, klass in obj.distribution.cmdclass.items():
-            if obj.__class__ == klass:
-                return name
+        if obj.__class__ == klass:
+            return name
     raise Exception("No such command class")
 
 
@@ -537,8 +588,8 @@ class picard_update_constants(Command):
                   "# Use `python setup.py {option}` to update it.\n"
                   "\n"
                   "RELEASE_COUNTRIES = {{\n")
-        line   =  "    '{code}': '{name}',\n"
-        footer =  "}}\n"
+        line = "    '{code}': '{name}',\n"
+        footer = "}}\n"
         filename = os.path.join('picard', 'const', 'countries.py')
         with open(filename, 'w') as countries_py:
             def write(s, **kwargs):
@@ -557,8 +608,8 @@ class picard_update_constants(Command):
                   "# Use `python setup.py {option}` to update it.\n"
                   "\n"
                   "MB_ATTRIBUTES = {{\n")
-        line   =  "    '{key}': '{value}',\n"
-        footer =  "}}\n"
+        line = "    '{key}': '{value}',\n"
+        footer = "}}\n"
         filename = os.path.join('picard', 'const', 'attributes.py')
         with open(filename, 'w') as attributes_py:
             def write(s, **kwargs):
@@ -591,7 +642,7 @@ class picard_patch_version(Command):
         regex = re.compile(r'^PICARD_BUILD_VERSION_STR\s*=.*$', re.MULTILINE)
         with open(filename, 'r+b') as f:
             source = (f.read()).decode()
-            build = self.platform + '_' + datetime.datetime.utcnow().strftime('%Y%m%d%H%M%S')
+            build = self.platform + '.' + datetime.datetime.utcnow().strftime('%Y%m%d%H%M%S')
             patched_source = regex.sub('PICARD_BUILD_VERSION_STR = "%s"' % build, source).encode()
             f.seek(0)
             f.write(patched_source)
@@ -626,7 +677,7 @@ def _explode_path(path):
     """Return a list of components of the path (ie. "/a/b" -> ["a", "b"])"""
     components = []
     while True:
-        (path,tail) = os.path.split(path)
+        (path, tail) = os.path.split(path)
         if tail == "":
             components.reverse()
             return components
@@ -634,18 +685,24 @@ def _explode_path(path):
 
 
 def _picard_packages():
-    "Build a tuple containing each module under picard/"
+    """Build a tuple containing each module under picard/"""
     packages = []
     for subdir, dirs, files in os.walk("picard"):
         packages.append(".".join(_explode_path(subdir)))
     return tuple(sorted(packages))
 
 
-args2 = {
+this_directory = os.path.abspath(os.path.dirname(__file__))
+with open(os.path.join(this_directory, 'README.md'), encoding='utf-8') as f:
+    long_description = f.read()
+
+args = {
     'name': PACKAGE_NAME,
     'version': __version__,
     'description': 'The next generation MusicBrainz tagger',
     'keywords': 'MusicBrainz metadata tagger picard',
+    'long_description': long_description,
+    'long_description_content_type': 'text/markdown',
     'url': 'https://picard.musicbrainz.org/',
     'package_dir': {'picard': 'picard'},
     'packages': _picard_packages(),
@@ -658,6 +715,8 @@ args2 = {
         'build_locales': picard_build_locales,
         'build_ui': picard_build_ui,
         'clean_ui': picard_clean_ui,
+        'build_appdata': picard_build_appdata,
+        'regen_appdata_pot_file': picard_regen_appdata_pot_file,
         'install': picard_install,
         'install_locales': picard_install_locales,
         'update_constants': picard_update_constants,
@@ -668,95 +727,30 @@ args2 = {
     'scripts': ['scripts/' + PACKAGE_NAME],
     'install_requires': ['PyQt5', 'mutagen'],
     'classifiers': [
-    'License :: OSI Approved :: GNU General Public License v2 or later (GPLv2+)',
-    'Development Status :: 3 - Alpha',
-    'Programming Language :: Python :: 3.5',
-    'Programming Language :: Python :: 3.6',
-    'Operating System :: Microsoft :: Windows',
-    'Operating System :: MacOS',
-    'Operating System :: POSIX :: Linux',
-    'Topic :: Multimedia :: Sound/Audio',
-    'Topic :: Multimedia :: Sound/Audio :: Analysis'
+        'License :: OSI Approved :: GNU General Public License v2 or later (GPLv2+)',
+        'Development Status :: 5 - Production/Stable',
+        'Programming Language :: Python :: 3',
+        'Programming Language :: Python :: 3 :: Only',
+        'Programming Language :: Python :: 3.5',
+        'Programming Language :: Python :: 3.6',
+        'Operating System :: Microsoft :: Windows',
+        'Operating System :: MacOS',
+        'Operating System :: POSIX :: Linux',
+        'Topic :: Multimedia :: Sound/Audio',
+        'Topic :: Multimedia :: Sound/Audio :: Analysis'
     ]
 }
-args.update(args2)
 
 
 def generate_file(infilename, outfilename, variables):
+    log.info('generating %s from %s', outfilename, infilename)
     with open(infilename, "rt") as f_in:
         with open(outfilename, "wt") as f_out:
             f_out.write(f_in.read() % variables)
 
 
-def contrib_plugin_files():
-    plugin_files = {}
-    dist_root = os.path.join("contrib", "plugins")
-    for root, dirs, files in os.walk(dist_root):
-        file_root = os.path.join('plugins', os.path.relpath(root, dist_root)) \
-            if root != dist_root else 'plugins'
-        for file in files:
-            if file.endswith(".py"):
-                if file_root in plugin_files:
-                    plugin_files[file_root].append(os.path.join(root, file))
-                else:
-                    plugin_files[file_root] = [os.path.join(root, file)]
-    data_files = [(x, sorted(y)) for x, y in plugin_files.items()]
-    return sorted(data_files, key=lambda x: x[0])
-
-
-try:
-    from py2exe.build_exe import py2exe
-
-    class bdist_nsis(py2exe):
-
-        def run(self):
-            generate_file('scripts/picard.py2exe.in', 'scripts/picard', {})
-            self.distribution.data_files.append(
-                ("", ["discid.dll", "fpcalc.exe", "msvcr90.dll", "msvcp90.dll"]))
-            for locale in self.distribution.locales:
-                self.distribution.data_files.append(
-                    ("locale/" + locale[1] + "/LC_MESSAGES",
-                     ["build/locale/" + locale[1] + "/LC_MESSAGES/" + locale[0] + ".mo"]))
-            self.distribution.data_files.append(
-                ("imageformats", [find_file_in_path("PyQt5/plugins/imageformats/qgif4.dll"),
-                                  find_file_in_path("PyQt5/plugins/imageformats/qjpeg4.dll"),
-                                  find_file_in_path("PyQt5/plugins/imageformats/qtiff4.dll")]))
-            self.distribution.data_files.append(
-                ("accessible", [find_file_in_path("PyQt5/plugins/accessible/qtaccessiblewidgets4.dll")]))
-            self.distribution.data_files += contrib_plugin_files()
-
-            py2exe.run(self)
-            print("*** creating the NSIS setup script ***")
-            pathname = r"installer\picard-setup.nsi"
-            generate_file(pathname + ".in", pathname,
-                          {'name': 'MusicBrainz Picard',
-                           'version': __version__,
-                           'description': 'The next generation MusicBrainz tagger.',
-                           'url': 'https://picard.musicbrainz.org/', })
-            print("*** compiling the NSIS setup script ***")
-            subprocess.call([self.find_nsis(), pathname])
-
-        def find_nsis(self):
-            import _winreg
-            with _winreg.OpenKey(_winreg.HKEY_LOCAL_MACHINE, "Software\\NSIS") as reg_key:
-                nsis_path = _winreg.QueryValueEx(reg_key, "")[0]
-                return os.path.join(nsis_path, "makensis.exe")
-
-    args['cmdclass']['bdist_nsis'] = bdist_nsis
-    args['windows'] = [{
-        'script': 'scripts/picard',
-        'icon_resources': [(1, 'picard.ico')],
-    }]
-    args['options'] = {
-        'bdist_nsis': {
-            # mimetypes is necessary for the videotools plugin
-            'includes': ['json', 'sip', 'mimetypes'] + [e.name for e in ext_modules],
-            'excludes': exclude_modules + py2exe_exclude_modules,
-            'optimize': 2,
-        },
-    }
-except ImportError:
-    py2exe = None
+def make_executable(filename):
+    os.chmod(filename, os.stat(filename).st_mode | stat.S_IEXEC)
 
 
 def find_file_in_path(filename):
@@ -765,35 +759,19 @@ def find_file_in_path(filename):
         if os.path.exists(file_path):
             return file_path
 
-if do_py2app:
-    from py2app.util import copy_file, find_app
-    from PyQt5 import QtCore
 
-    class BuildAPP(py2app):
+args['data_files'] = [
+    (
+        'share/icons/hicolor/{size}x{size}/apps'.format(size=size),
+        ['resources/images/{size}x{size}/{app_id}.png'.format(size=size, app_id=PICARD_APP_ID)]
+    )
+    for size in (16, 24, 32, 48, 128, 256)
+]
 
-        def run(self):
-            py2app.run(self)
+args['data_files'].append(('share/icons/hicolor/scalable/apps', ['resources/%s.svg' % PICARD_APP_ID]))
+args['data_files'].append(('share/applications', [PICARD_DESKTOP_NAME]))
 
-            # XXX Find and bundle fpcalc, since py2app can't.
-            fpcalc = find_app("fpcalc")
-            if fpcalc:
-                dest_fpcalc = os.path.abspath("dist/MusicBrainz Picard.app/Contents/MacOS/fpcalc")
-                copy_file(fpcalc, dest_fpcalc)
-                os.chmod(dest_fpcalc, 0o755)
-
-    args['scripts'] = ['tagger.py']
-    args['cmdclass']['py2app'] = BuildAPP
-
-# FIXME: this should check for the actual command ('install' vs. 'bdist_nsis', 'py2app', ...), not installed libraries
-if py2exe is None and do_py2app is False:
-    args['data_files'].append(('share/icons/hicolor/16x16/apps', ['resources/images/16x16/picard.png']))
-    args['data_files'].append(('share/icons/hicolor/24x24/apps', ['resources/images/24x24/picard.png']))
-    args['data_files'].append(('share/icons/hicolor/32x32/apps', ['resources/images/32x32/picard.png']))
-    args['data_files'].append(('share/icons/hicolor/48x48/apps', ['resources/images/48x48/picard.png']))
-    args['data_files'].append(('share/icons/hicolor/128x128/apps', ['resources/images/128x128/picard.png']))
-    args['data_files'].append(('share/icons/hicolor/256x256/apps', ['resources/images/256x256/picard.png']))
-    args['data_files'].append(('share/icons/hicolor/scalable/apps', ['resources/img-src/picard.svg']))
-    args['data_files'].append(('share/applications', ('picard.desktop',)))
-    args['data_files'].append('scripts/picard.in')
+if sys.platform == 'linux':
+    args['data_files'].append(('share/metainfo', [APPDATA_FILE]))
 
 setup(**args)

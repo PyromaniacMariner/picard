@@ -19,12 +19,17 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 
 from picard import config
-from picard.ui.options import OptionsPage, register_options_page
 from picard.util.cdrom import (
-    get_cdrom_drives,
     AUTO_DETECT_DRIVES,
-    DEFAULT_DRIVES
+    DEFAULT_DRIVES,
+    get_cdrom_drives,
 )
+
+from picard.ui.options import (
+    OptionsPage,
+    register_options_page,
+)
+
 
 if AUTO_DETECT_DRIVES:
     from picard.ui.ui_options_cdlookup_select import Ui_CDLookupOptionsPage
@@ -41,32 +46,36 @@ class CDLookupOptionsPage(OptionsPage):
     ACTIVE = True
 
     options = [
-        config.TextOption("setting", "cd_lookup_device",
-                          ",".join(DEFAULT_DRIVES)),
+        config.TextOption("setting", "cd_lookup_device", ",".join(DEFAULT_DRIVES)),
     ]
 
     def __init__(self, parent=None):
-        super(CDLookupOptionsPage, self).__init__(parent)
+        super().__init__(parent)
         self.ui = Ui_CDLookupOptionsPage()
         self.ui.setupUi(self)
         if AUTO_DETECT_DRIVES:
-            self.drives = get_cdrom_drives()
-            self.ui.cd_lookup_device.addItems(self.drives)
+            self._device_list = get_cdrom_drives()
+            self.ui.cd_lookup_device.addItems(self._device_list)
 
     def load(self):
+        device = config.setting["cd_lookup_device"]
         if AUTO_DETECT_DRIVES:
             try:
-                self.ui.cd_lookup_device.setCurrentIndex(self.drives.index(config.setting["cd_lookup_device"]))
+                self.ui.cd_lookup_device.setCurrentIndex(self._device_list.index(device))
             except ValueError:
                 pass
         else:
-            self.ui.cd_lookup_device.setText(config.setting["cd_lookup_device"])
+            self.ui.cd_lookup_device.setText(device)
 
     def save(self):
         if AUTO_DETECT_DRIVES:
-            config.setting["cd_lookup_device"] = self.ui.cd_lookup_device.currentText()
+            device = self.ui.cd_lookup_device.currentText()
+            device_list = self._device_list
         else:
-            config.setting["cd_lookup_device"] = self.ui.cd_lookup_device.text()
+            device = self.ui.cd_lookup_device.text()
+            device_list = [device]
+        config.setting["cd_lookup_device"] = device
+        self.tagger.window.update_cd_lookup_drives(device_list)
 
 
 register_options_page(CDLookupOptionsPage)

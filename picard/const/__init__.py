@@ -17,9 +17,10 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 
+from collections import OrderedDict
 import os
-import sys
 
+from PyQt5.QtCore import QStandardPaths
 from picard import PICARD_APP_NAME
 
 # Install gettext "noop" function in case const.py gets imported directly.
@@ -28,16 +29,12 @@ builtins.__dict__['N_'] = lambda a: a
 
 
 # Config directory
-if sys.platform == "win32":
-    USER_DIR = os.environ.get("APPDATA", "~\\Application Data")
-else:
-    USER_DIR = os.environ.get("XDG_CONFIG_HOME", "~/.config")
-
-USER_DIR = os.path.join(
-    os.path.expanduser(USER_DIR), "MusicBrainz", PICARD_APP_NAME
-)
-
+_appconfiglocation = QStandardPaths.writableLocation(QStandardPaths.AppConfigLocation)
+USER_DIR = os.path.join(_appconfiglocation, "MusicBrainz", PICARD_APP_NAME)
 USER_PLUGIN_DIR = os.path.join(USER_DIR, "plugins")
+
+# Cache directory
+CACHE_DIR = QStandardPaths.writableLocation(QStandardPaths.CacheLocation)
 
 # AcoustID client API key
 ACOUSTID_KEY = 'v8pQ6oyB'
@@ -90,13 +87,13 @@ for k, v in MB_ATTRIBUTES.items():
         RELEASE_SECONDARY_GROUPS[v] = v
 
 # Release countries
-from picard.const.countries import RELEASE_COUNTRIES
+from picard.const.countries import RELEASE_COUNTRIES  # noqa: F401 # pylint: disable=unused-import
 
 # List of available user interface languages
-from picard.const.languages import UI_LANGUAGES
+from picard.const.languages import UI_LANGUAGES  # noqa: F401 # pylint: disable=unused-import
 
 # List of alias locales
-from picard.const.locales import ALIAS_LOCALES
+from picard.const.locales import ALIAS_LOCALES  # noqa: F401 # pylint: disable=unused-import
 
 # List of official musicbrainz servers - must support SSL for mblogin requests (such as collections).
 MUSICBRAINZ_SERVERS = [
@@ -104,13 +101,14 @@ MUSICBRAINZ_SERVERS = [
     'beta.musicbrainz.org',
 ]
 
-# Plugins API
+# Plugins and Release Versions API
 PLUGINS_API = {
     'host': 'picard.musicbrainz.org',
     'port': 443,
     'endpoint': {
         'plugins': '/api/v2/plugins/',
-        'download': '/api/v2/download/'
+        'download': '/api/v2/download/',
+        'releases': '/api/v2/releases',
     }
 }
 
@@ -119,3 +117,39 @@ QUERY_LIMIT = 25
 
 # Maximum number of covers to draw in a stack in CoverArtThumbnail
 MAX_COVERS_TO_STACK = 4
+
+# Update levels available for automatic checking
+PROGRAM_UPDATE_LEVELS = OrderedDict(
+    [
+        (
+            0, {
+                'name': 'stable',
+                'title': N_('Stable releases only'),
+            }
+        ),
+        (
+            1, {
+                'name': 'beta',
+                'title': N_('Stable and Beta releases'),
+            }
+        ),
+        (
+            2, {
+                'name': 'dev',
+                'title': N_('Stable, Beta and Dev releases'),
+            }
+        ),
+    ]
+)
+
+
+DEFAULT_FILE_NAMING_FORMAT = "$if2(%albumartist%,%artist%)/\n" \
+    "$if(%albumartist%,%album%/,)\n" \
+    "$if($gt(%totaldiscs%,1),%discnumber%-,)" \
+    "$if($and(%albumartist%,%tracknumber%),$num(%tracknumber%,2) ,)" \
+    "$if(%_multiartist%,%artist% - ,)" \
+    "%title%"
+
+
+DEFAULT_NUMBERED_SCRIPT_NAME = N_("My script %d")
+DEFAULT_SCRIPT_NAME = N_("My script")

@@ -18,7 +18,11 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 
 from picard import config
-from picard.ui.options import OptionsPage, register_options_page
+
+from picard.ui.options import (
+    OptionsPage,
+    register_options_page,
+)
 from picard.ui.ui_options_matching import Ui_MatchingOptionsPage
 
 
@@ -39,7 +43,7 @@ class MatchingOptionsPage(OptionsPage):
     _release_type_sliders = {}
 
     def __init__(self, parent=None):
-        super(MatchingOptionsPage, self).__init__(parent)
+        super().__init__(parent)
         self.ui = Ui_MatchingOptionsPage()
         self.ui.setupUi(self)
 

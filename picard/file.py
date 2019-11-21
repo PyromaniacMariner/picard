@@ -18,44 +18,56 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 
+from collections import defaultdict
 import fnmatch
+from functools import partial
 import os
 import os.path
-import shutil
-import sys
 import re
+import shutil
 import unicodedata
-from functools import partial
-from operator import itemgetter
-from collections import defaultdict
+
 from PyQt5 import QtCore
-from picard import config, log
-from picard.metadata import Metadata
-from picard.ui.item import Item
-from picard.script import ScriptParser
+
+from picard import (
+    PICARD_APP_NAME,
+    config,
+    log,
+)
+from picard.const import QUERY_LIMIT
+from picard.const.sys import (
+    IS_MACOS,
+    IS_WIN,
+)
+from picard.metadata import (
+    Metadata,
+    SimMatchTrack,
+)
+from picard.plugin import (
+    PluginFunctions,
+    PluginPriority,
+)
 from picard.util import (
     decode_filename,
-    encode_filename,
+    emptydir,
+    find_best_match,
     format_time,
     pathcmp,
-    replace_win32_incompat,
-    sanitize_filename,
     thread,
     tracknum_from_filename,
 )
-from picard.util.textencoding import (
-    replace_non_ascii,
-    unaccent,
-)
 from picard.util.filenaming import make_short_filename
+from picard.util.scripttofilename import script_to_filename
 from picard.util.tags import PRESERVED_TAGS
-from picard.const import QUERY_LIMIT
-from picard import PICARD_APP_NAME
+
+from picard.ui.item import Item
 
 
 class File(QtCore.QObject, Item):
 
     metadata_images_changed = QtCore.pyqtSignal()
+
+    NAME = None
 
     UNDEFINED = -1
     PENDING = 0
@@ -63,6 +75,9 @@ class File(QtCore.QObject, Item):
     CHANGED = 2
     ERROR = 3
     REMOVED = 4
+
+    LOOKUP_METADATA = 1
+    LOOKUP_ACOUSTID = 2
 
     comparison_weights = {
         "title": 13,
@@ -73,10 +88,21 @@ class File(QtCore.QObject, Item):
         "releasetype": 20,
         "releasecountry": 2,
         "format": 2,
+        "isvideo": 2,
     }
 
+    class PreserveTimesStatError(Exception):
+        pass
+
+    class PreserveTimesUtimeError(Exception):
+        pass
+
+    # in order to significantly speed up performance, the number of pending
+    # files is cached, set @state.setter
+    num_pending_files = 0
+
     def __init__(self, filename):
-        super(File, self).__init__()
+        super().__init__()
         self.filename = filename
         self.base_filename = os.path.basename(filename)
         self._state = File.UNDEFINED
@@ -93,7 +119,7 @@ class File(QtCore.QObject, Item):
         self.item = None
 
     def __repr__(self):
-        return '<File %r>' % self.base_filename
+        return '<%s %r>' % (type(self).__name__, self.base_filename)
 
     @property
     def new_metadata(self):
@@ -124,40 +150,41 @@ class File(QtCore.QObject, Item):
         if self.state != File.PENDING or self.tagger.stopping:
             return
         if error is not None:
-            self.error = string_(error)
+            self.error = str(error)
             self.state = self.ERROR
             from picard.formats import supported_extensions
             file_name, file_extension = os.path.splitext(self.base_filename)
             if file_extension not in supported_extensions():
                 self.remove()
-                log.error('Unsupported media file %r wrongly loaded. Removing ...',self)
+                log.error('Unsupported media file %r wrongly loaded. Removing ...', self)
                 return
         else:
             self.error = None
             self.state = self.NORMAL
             self._copy_loaded_metadata(result)
+        run_file_post_load_processors(self)
         self.update()
         callback(self)
 
     def _copy_loaded_metadata(self, metadata):
         filename, _ = os.path.splitext(self.base_filename)
         metadata['~length'] = format_time(metadata.length)
-        if 'title' not in metadata:
-            metadata['title'] = filename
         if 'tracknumber' not in metadata:
             tracknumber = tracknum_from_filename(self.base_filename)
             if tracknumber != -1:
-                tracknumber = string_(tracknumber)
+                tracknumber = str(tracknumber)
                 metadata['tracknumber'] = tracknumber
-                if metadata['title'] == filename:
+                if 'title' not in metadata:
                     stripped_filename = filename.lstrip('0')
                     tnlen = len(tracknumber)
                     if stripped_filename[:tnlen] == tracknumber:
                         metadata['title'] = stripped_filename[tnlen:].lstrip()
+        if 'title' not in metadata:
+            metadata['title'] = filename
         self.orig_metadata = metadata
         self.metadata.copy(metadata)
 
-    def copy_metadata(self, metadata):
+    def copy_metadata(self, metadata, preserve_deleted=True):
         acoustid = self.metadata["acoustid_id"]
         preserve = config.setting["preserved_tags"].strip()
         saved_metadata = {}
@@ -168,16 +195,18 @@ class File(QtCore.QObject, Item):
                 saved_metadata[tag] = values
         deleted_tags = self.metadata.deleted_tags
         self.metadata.copy(metadata)
-        self.metadata.deleted_tags = deleted_tags
+        if preserve_deleted:
+            for tag in deleted_tags:
+                del self.metadata[tag]
         for tag, values in saved_metadata.items():
-            self.metadata.set(tag, values)
+            self.metadata[tag] = values
 
-        if acoustid:
+        if acoustid and "acoustid_id" not in metadata.deleted_tags:
             self.metadata["acoustid_id"] = acoustid
         self.metadata_images_changed.emit()
 
     def keep_original_images(self):
-        self.metadata.images = self.orig_metadata.images[:]
+        self.metadata.images = self.orig_metadata.images.copy()
         self.update()
         self.metadata_images_changed.emit()
 
@@ -194,6 +223,26 @@ class File(QtCore.QObject, Item):
             priority=2,
             thread_pool=self.tagger.save_thread_pool)
 
+    def _preserve_times(self, filename, func):
+        """Save filename times before calling func, and set them again"""
+        try:
+            # https://docs.python.org/3/library/os.html#os.utime
+            # Since Python 3.3, ns parameter is available
+            # The best way to preserve exact times is to use the st_atime_ns and st_mtime_ns
+            # fields from the os.stat() result object with the ns parameter to utime.
+            st = os.stat(filename)
+        except OSError as why:
+            errmsg = "Couldn't read timestamps from %r: %s" % (filename, why)
+            raise self.PreserveTimesStatError(errmsg) from None
+            # if we can't read original times, don't call func and let caller handle this
+        func()
+        try:
+            os.utime(filename, ns=(st.st_atime_ns, st.st_mtime_ns))
+        except OSError as why:
+            errmsg = "Couldn't preserve timestamps for %r: %s" % (filename, why)
+            raise self.PreserveTimesUtimeError(errmsg) from None
+        return (st.st_atime_ns, st.st_mtime_ns)
+
     def _save_and_rename(self, old_filename, metadata):
         """Save the metadata."""
         # Check that file has not been removed since thread was queued
@@ -206,14 +255,14 @@ class File(QtCore.QObject, Item):
             return None
         new_filename = old_filename
         if not config.setting["dont_write_tags"]:
-            encoded_old_filename = encode_filename(old_filename)
-            info = os.stat(encoded_old_filename)
-            self._save(old_filename, metadata)
+            save = partial(self._save, old_filename, metadata)
             if config.setting["preserve_timestamps"]:
                 try:
-                    os.utime(encoded_old_filename, (info.st_atime, info.st_mtime))
-                except OSError:
-                    log.warning("Couldn't preserve timestamp for %r", old_filename)
+                    self._preserve_times(old_filename, save)
+                except self.PreserveTimesUtimeError as why:
+                    log.warning(why)
+            else:
+                save()
         # Rename files
         if config.setting["rename_files"] or config.setting["move_files"]:
             new_filename = self._rename(old_filename, metadata)
@@ -222,43 +271,34 @@ class File(QtCore.QObject, Item):
             self._move_additional_files(old_filename, new_filename)
         # Delete empty directories
         if config.setting["delete_empty_dirs"]:
-            dirname = encode_filename(os.path.dirname(old_filename))
+            dirname = os.path.dirname(old_filename)
             try:
-                self._rmdir(dirname)
+                emptydir.rm_empty_dir(dirname)
                 head, tail = os.path.split(dirname)
                 if not tail:
                     head, tail = os.path.split(head)
                 while head and tail:
-                    try:
-                        self._rmdir(head)
-                    except:
-                        break
+                    emptydir.rm_empty_dir(head)
                     head, tail = os.path.split(head)
-            except EnvironmentError:
-                pass
+            except OSError as why:
+                log.warning("Error removing directory: %s", why)
+            except emptydir.SkipRemoveDir as why:
+                log.debug("Not removing empty directory: %s", why)
         # Save cover art images
         if config.setting["save_images_to_files"]:
             self._save_images(os.path.dirname(new_filename), metadata)
         return new_filename
 
-    @staticmethod
-    def _rmdir(dir):
-        junk_files = (".DS_Store", "desktop.ini", "Desktop.ini", "Thumbs.db")
-        if not set(os.listdir(dir)) - set(junk_files):
-            shutil.rmtree(dir, False)
-        else:
-            raise OSError
-
     def _saving_finished(self, result=None, error=None):
         # Handle file removed before save
         # Result is None if save was skipped
         if ((self.state == File.REMOVED or self.tagger.stopping)
-            and result is None):
+                and result is None):
             return
         old_filename = new_filename = self.filename
         if error is not None:
-            self.error = string_(error)
-            self.set_state(File.ERROR, update=True)
+            self.error = str(error)
+            self.state = File.ERROR
         else:
             self.filename = new_filename = result
             self.base_filename = os.path.basename(new_filename)
@@ -267,20 +307,29 @@ class File(QtCore.QObject, Item):
             for info in ('~bitrate', '~sample_rate', '~channels',
                          '~bits_per_sample', '~format'):
                 temp_info[info] = self.orig_metadata[info]
-            # Data is copied from New to Original because New may be a subclass to handle id3v23
+            # Data is copied from New to Original because New may be
+            # a subclass to handle id3v23
             if config.setting["clear_existing_tags"]:
                 self.orig_metadata.copy(self.new_metadata)
             else:
                 self.orig_metadata.update(self.new_metadata)
+            # After saving deleted tags should no longer be marked deleted
+            self.new_metadata.clear_deleted()
+            self.orig_metadata.clear_deleted()
             self.orig_metadata.length = length
             self.orig_metadata['~length'] = format_time(length)
             for k, v in temp_info.items():
                 self.orig_metadata[k] = v
             self.error = None
-            # Force update to ensure file status icon changes immediately after save
-            self.clear_pending(force_update=True)
+            self.clear_pending()
             self._add_path_to_metadata(self.orig_metadata)
             self.metadata_images_changed.emit()
+
+            # run post save hook
+            run_file_post_save_processors(self)
+
+        # Force update to ensure file status icon changes immediately after save
+        self.update()
 
         if self.state != File.REMOVED:
             del self.tagger.files[old_filename]
@@ -297,28 +346,12 @@ class File(QtCore.QObject, Item):
         if settings is None:
             settings = config.setting
         metadata = Metadata()
-        if config.setting["clear_existing_tags"]:
+        if settings["clear_existing_tags"]:
             metadata.copy(file_metadata)
         else:
             metadata.copy(self.orig_metadata)
             metadata.update(file_metadata)
-        # make sure every metadata can safely be used in a path name
-        for name in metadata.keys():
-            if isinstance(metadata[name], str):
-                metadata[name] = sanitize_filename(metadata[name])
-        naming_format = naming_format.replace("\t", "").replace("\n", "")
-        filename = ScriptParser().eval(naming_format, metadata, self)
-        if settings["ascii_filenames"]:
-            if isinstance(filename, str):
-                filename = unaccent(filename)
-            filename = replace_non_ascii(filename)
-        # replace incompatible characters
-        if settings["windows_compatibility"] or sys.platform == "win32":
-            filename = replace_win32_incompat(filename)
-        # remove null characters
-        if isinstance(filename, (bytes, bytearray)):
-            filename = filename.replace(b"\x00", "")
-        return filename
+        return script_to_filename(naming_format, metadata, file=self, settings=settings)
 
     def _fixed_splitext(self, filename):
         # In case the filename is blank and only has the extension
@@ -329,7 +362,40 @@ class File(QtCore.QObject, Item):
             new_filename = ''
         return new_filename, ext
 
-    def _make_filename(self, filename, metadata, settings=None):
+    def _format_filename(self, new_dirname, new_filename, metadata, settings):
+        old_filename = new_filename
+        new_filename, ext = self._fixed_splitext(new_filename)
+        ext = ext.lower()
+        new_filename = new_filename + ext
+
+        # expand the naming format
+        naming_format = settings['file_naming_format']
+        if naming_format:
+            new_filename = self._script_to_filename(naming_format, metadata, settings)
+            # NOTE: the _script_to_filename strips the extension away
+            new_filename = new_filename + ext
+            if not settings['rename_files']:
+                new_filename = os.path.join(os.path.dirname(new_filename), old_filename)
+            if not settings['move_files']:
+                new_filename = os.path.basename(new_filename)
+            win_compat = IS_WIN or settings['windows_compatibility']
+            new_filename = make_short_filename(new_dirname, new_filename,
+                                               win_compat)
+            # TODO: move following logic under util.filenaming
+            # (and reconsider its necessity)
+            # win32 compatibility fixes
+            if win_compat:
+                new_filename = new_filename.replace('./', '_/').replace('.\\', '_\\')
+            # replace . at the beginning of file and directory names
+            new_filename = new_filename.replace('/.', '/_').replace('\\.', '\\_')
+            if new_filename.startswith('.'):
+                new_filename = '_' + new_filename[1:]
+            # Fix for precomposed characters on OSX
+            if IS_MACOS:
+                new_filename = unicodedata.normalize("NFD", new_filename)
+        return new_filename
+
+    def make_filename(self, filename, metadata, settings=None):
         """Constructs file name based on metadata and file naming formats."""
         if settings is None:
             settings = config.setting
@@ -341,56 +407,35 @@ class File(QtCore.QObject, Item):
             new_dirname = os.path.dirname(filename)
         new_filename = os.path.basename(filename)
 
-        if settings["rename_files"]:
-            new_filename, ext = self._fixed_splitext(new_filename)
-            ext = ext.lower()
-            new_filename = new_filename + ext
+        if settings["rename_files"] or settings["move_files"]:
+            new_filename = self._format_filename(new_dirname, new_filename, metadata, settings)
 
-            # expand the naming format
-            naming_format = settings['file_naming_format']
-            if len(naming_format) > 0:
-                new_filename = self._script_to_filename(naming_format, metadata, settings)
-                # NOTE: the _script_to_filename strips the extension away
-                new_filename = new_filename + ext
-                if not settings['move_files']:
-                    new_filename = os.path.basename(new_filename)
-                new_filename = make_short_filename(new_dirname, new_filename,
-                                                   config.setting['windows_compatibility'],
-                                                   config.setting['windows_compatibility_drive_root'])
-                # TODO: move following logic under util.filenaming
-                # (and reconsider its necessity)
-                # win32 compatibility fixes
-                if settings['windows_compatibility'] or sys.platform == 'win32':
-                    new_filename = new_filename.replace('./', '_/').replace('.\\', '_\\')
-                # replace . at the beginning of file and directory names
-                new_filename = new_filename.replace('/.', '/_').replace('\\.', '\\_')
-                if new_filename and new_filename[0] == '.':
-                    new_filename = '_' + new_filename[1:]
-                # Fix for precomposed characters on OSX
-                if sys.platform == "darwin":
-                    new_filename = unicodedata.normalize("NFD", new_filename)
-
-        return os.path.realpath(os.path.join(new_dirname, new_filename))
+        new_path = os.path.join(new_dirname, new_filename)
+        try:
+            return os.path.realpath(new_path)
+        except FileNotFoundError:
+            # os.path.realpath can fail if cwd doesn't exist
+            return new_path
 
     def _rename(self, old_filename, metadata):
         new_filename, ext = os.path.splitext(
-            self._make_filename(old_filename, metadata))
+            self.make_filename(old_filename, metadata))
 
         if old_filename == new_filename + ext:
             return old_filename
 
         new_dirname = os.path.dirname(new_filename)
-        if not os.path.isdir(encode_filename(new_dirname)):
+        if not os.path.isdir(new_dirname):
             os.makedirs(new_dirname)
         tmp_filename = new_filename
         i = 1
-        while (not pathcmp(old_filename, new_filename + ext) and
-               os.path.exists(encode_filename(new_filename + ext))):
+        while (not pathcmp(old_filename, new_filename + ext)
+               and os.path.exists(new_filename + ext)):
             new_filename = "%s (%d)" % (tmp_filename, i)
             i += 1
         new_filename = new_filename + ext
         log.debug("Moving file %r => %r", old_filename, new_filename)
-        shutil.move(encode_filename(old_filename), encode_filename(new_filename))
+        shutil.move(old_filename, new_filename)
         return new_filename
 
     def _save_images(self, dirname, metadata):
@@ -400,39 +445,57 @@ class File(QtCore.QObject, Item):
         counters = defaultdict(lambda: 0)
         images = []
         if config.setting["caa_save_single_front_image"]:
-            images = metadata.get_single_front_image()
+            images = [metadata.images.get_front_image()]
         if not images:
             images = metadata.images
         for image in images:
             image.save(dirname, metadata, counters)
 
     def _move_additional_files(self, old_filename, new_filename):
-        """Move extra files, like playlists..."""
-        old_path = encode_filename(os.path.dirname(old_filename))
-        new_path = encode_filename(os.path.dirname(new_filename))
-        patterns = encode_filename(config.setting["move_additional_files_pattern"])
-        patterns = [string_(p.strip()) for p in patterns.split() if p.strip()]
-        try:
-            names = list(map(encode_filename, os.listdir(old_path)))
-        except os.error:
-            log.error("Error: {} directory not found".naming_format(old_path))
+        """Move extra files, like images, playlists..."""
+        new_path = os.path.dirname(new_filename)
+        old_path = os.path.dirname(old_filename)
+        if new_path == old_path:
+            # skip, same directory, nothing to move
             return
-        filtered_names = [name for name in names if name[0] != "."]
-        for pattern in patterns:
-            pattern_regex = re.compile(encode_filename(fnmatch.translate(pattern)), re.IGNORECASE)
-            file_names = names
-            if pattern[0] != '.':
-                file_names = filtered_names
-            for old_file in file_names:
-                if pattern_regex.match(old_file):
-                    new_file = os.path.join(new_path, old_file)
-                    old_file = os.path.join(old_path, old_file)
-                    # FIXME we shouldn't do this from a thread!
-                    if self.tagger.files.get(decode_filename(old_file)):
-                        log.debug("File loaded in the tagger, not moving %r", old_file)
+        patterns = config.setting["move_additional_files_pattern"]
+        pattern_regexes = set()
+        for pattern in patterns.split():
+            pattern = pattern.strip()
+            if not pattern:
+                continue
+            pattern_regex = re.compile(fnmatch.translate(pattern), re.IGNORECASE)
+            match_hidden = pattern.startswith('.')
+            pattern_regexes.add((pattern_regex, match_hidden))
+        if not pattern_regexes:
+            return
+        moves = set()
+        try:
+            # TODO: use with statement with python 3.6+
+            for entry in os.scandir(old_path):
+                is_hidden = entry.name.startswith('.')
+                for pattern_regex, match_hidden in pattern_regexes:
+                    if is_hidden and not match_hidden:
                         continue
-                    log.debug("Moving %r to %r", old_file, new_file)
-                    shutil.move(old_file, new_file)
+                    if pattern_regex.match(entry.name):
+                        new_file_path = os.path.join(new_path, entry.name)
+                        moves.add((entry.path, new_file_path))
+                        break  # we are done with this file
+        except OSError as why:
+            log.error("Failed to scan %r: %s", old_path, why)
+            return
+
+        for old_file_path, new_file_path in moves:
+            # FIXME we shouldn't do this from a thread!
+            if self.tagger.files.get(decode_filename(old_file_path)):
+                log.debug("File loaded in the tagger, not moving %r", old_file_path)
+                continue
+            log.debug("Moving %r to %r", old_file_path, new_file_path)
+            try:
+                shutil.move(old_file_path, new_file_path)
+            except OSError as why:
+                log.error("Failed to move %r to %r: %s", old_file_path,
+                          new_file_path, why)
 
     def remove(self, from_parent=True):
         if from_parent and self.parent:
@@ -451,7 +514,7 @@ class File(QtCore.QObject, Item):
                 self.parent.remove_file(self)
             self.parent = parent
             self.parent.add_file(self)
-            self.tagger.acoustidmanager.update(self, self.metadata['musicbrainz_recordingid'])
+            self._acoustid_update()
 
     def _move(self, parent):
         if parent != self.parent:
@@ -459,9 +522,18 @@ class File(QtCore.QObject, Item):
             if self.parent:
                 self.parent.remove_file(self)
             self.parent = parent
-            self.tagger.acoustidmanager.update(self, self.metadata['musicbrainz_recordingid'])
+            self._acoustid_update()
 
-    def supports_tag(self, name):
+    def _acoustid_update(self):
+        recording_id = None
+        if self.parent and hasattr(self.parent, 'orig_metadata'):
+            recording_id = self.parent.orig_metadata['musicbrainz_recordingid']
+        if not recording_id:
+            recording_id = self.metadata['musicbrainz_recordingid']
+        self.tagger.acoustidmanager.update(self, recording_id)
+
+    @classmethod
+    def supports_tag(cls, name):
         """Returns whether tag ``name`` can be saved to the file."""
         return True
 
@@ -476,26 +548,26 @@ class File(QtCore.QObject, Item):
         for name in names:
             if not name.startswith('~') and self.supports_tag(name):
                 new_values = new_metadata.getall(name)
-                if not (new_values or clear_existing_tags):
+                if not (new_values or clear_existing_tags
+                        or name in new_metadata.deleted_tags):
                     continue
                 orig_values = self.orig_metadata.getall(name)
                 if orig_values != new_values:
                     self.similarity = self.orig_metadata.compare(new_metadata)
-                    if self.state in (File.CHANGED, File.NORMAL):
+                    if self.state == File.NORMAL:
                         self.state = File.CHANGED
                     break
         else:
-            if (self.metadata.images and
-               self.orig_metadata.images != self.metadata.images):
+            if (self.metadata.images
+                    and self.orig_metadata.images != self.metadata.images):
                 self.state = File.CHANGED
             else:
                 self.similarity = 1.0
-                if self.state in (File.CHANGED, File.NORMAL):
+                if self.state == File.CHANGED:
                     self.state = File.NORMAL
         if signal:
             log.debug("Updating file %r", self)
-            if self.item:
-                self.item.update()
+            self.update_item()
 
     def can_save(self):
         """Return if this object can be saved."""
@@ -533,7 +605,10 @@ class File(QtCore.QObject, Item):
             metadata['~channels'] = file.info.channels
         if hasattr(file.info, 'bits_per_sample') and file.info.bits_per_sample:
             metadata['~bits_per_sample'] = file.info.bits_per_sample
-        metadata['~format'] = self.__class__.__name__.replace('File', '')
+        if self.NAME:
+            metadata['~format'] = self.NAME
+        else:
+            metadata['~format'] = self.__class__.__name__.replace('File', '')
         self._add_path_to_metadata(metadata)
 
     def _add_path_to_metadata(self, metadata):
@@ -542,25 +617,22 @@ class File(QtCore.QObject, Item):
         metadata['~filename'] = filename
         metadata['~extension'] = extension.lower()[1:]
 
-    def get_state(self):
+    @property
+    def state(self):
+        """Current state of the File object"""
         return self._state
 
-    # in order to significantly speed up performance, the number of pending
-    #  files is cached
-    num_pending_files = 0
-
-    def set_state(self, state, update=False):
-        if state != self._state:
-            if state == File.PENDING:
-                File.num_pending_files += 1
-            elif self._state == File.PENDING:
-                File.num_pending_files -= 1
+    @state.setter
+    def state(self, state):
+        if state == self._state:
+            return
+        if state == File.PENDING:
+            File.num_pending_files += 1
+            self.tagger.tagger_stats_changed.emit()
+        elif self._state == File.PENDING:
+            File.num_pending_files -= 1
+            self.tagger.tagger_stats_changed.emit()
         self._state = state
-        if update:
-            self.update()
-        self.tagger.tagger_stats_changed.emit()
-
-    state = property(get_state, set_state)
 
     def column(self, column):
         m = self.metadata
@@ -575,54 +647,65 @@ class File(QtCore.QObject, Item):
             return
         if error:
             log.error("Network error encountered during the lookup for %s. Error code: %s",
-                       self.filename, error)
+                      self.filename, error)
         try:
-            if lookuptype == "metadata":
-                tracks = document['recordings']
-            elif lookuptype == "acoustid":
-                tracks = document['recordings']
+            tracks = document['recordings']
         except (KeyError, TypeError):
             tracks = None
 
-        # no matches
-        if not tracks:
+        def statusbar(message):
             self.tagger.window.set_statusbar_message(
-                N_("No matching tracks for file '%(filename)s'"),
+                message,
                 {'filename': self.filename},
                 timeout=3000
             )
-            self.clear_pending()
-            return
 
-        # multiple matches -- calculate similarities to each of them
-        match = sorted((self.metadata.compare_to_track(
-            track, self.comparison_weights) for track in tracks),
-            reverse=True, key=itemgetter(0))[0]
-        if lookuptype != 'acoustid' and match[0] < config.setting['file_lookup_threshold']:
-            self.tagger.window.set_statusbar_message(
-                N_("No matching tracks above the threshold for file '%(filename)s'"),
-                {'filename': self.filename},
-                timeout=3000
-            )
-            self.clear_pending()
-            return
+        if tracks:
+            if lookuptype == File.LOOKUP_ACOUSTID:
+                threshold = 0
+            else:
+                threshold = config.setting['file_lookup_threshold']
 
-        self.tagger.window.set_statusbar_message(
-            N_("File '%(filename)s' identified!"),
-            {'filename': self.filename},
-            timeout=3000
-        )
+            trackmatch = self._match_to_track(tracks, threshold=threshold)
+            if trackmatch is None:
+                statusbar(N_("No matching tracks above the threshold for file '%(filename)s'"))
+            else:
+                statusbar(N_("File '%(filename)s' identified!"))
+                (track_id, release_group_id, release_id, node) = trackmatch
+                if lookuptype == File.LOOKUP_ACOUSTID:
+                    self.tagger.acoustidmanager.add(self, track_id)
+                if release_group_id is not None:
+                    releasegroup = self.tagger.get_release_group_by_id(release_group_id)
+                    releasegroup.loaded_albums.add(release_id)
+                    self.tagger.move_file_to_track(self, release_id, track_id)
+                else:
+                    self.tagger.move_file_to_nat(self, track_id, node=node)
+        else:
+            statusbar(N_("No matching tracks for file '%(filename)s'"))
 
         self.clear_pending()
 
-        rg, release, track = match[1:]
-        if lookuptype == 'acoustid':
-            self.tagger.acoustidmanager.add(self, track['id'])
-        if release:
-            self.tagger.get_release_group_by_id(rg['id']).loaded_albums.add(release['id'])
-            self.tagger.move_file_to_track(self, release['id'], track['id'])
+    def _match_to_track(self, tracks, threshold=0):
+        # multiple matches -- calculate similarities to each of them
+        def candidates():
+            for track in tracks:
+                yield self.metadata.compare_to_track(track, self.comparison_weights)
+
+        no_match = SimMatchTrack(similarity=-1, releasegroup=None, release=None, track=None)
+        best_match = find_best_match(candidates, no_match)
+
+        if best_match.similarity < threshold:
+            return None
         else:
-            self.tagger.move_file_to_nat(self, track['id'], node=track)
+            track_id = best_match.result.track['id']
+            release_group_id, release_id, node = None, None, None
+
+            if best_match.result.release:
+                release_group_id = best_match.result.releasegroup['id']
+                release_id = best_match.result.release['id']
+            elif 'title' in best_match.result.track:
+                node = best_match.result.track
+            return (track_id, release_group_id, release_id, node)
 
     def lookup_metadata(self):
         """Try to identify the file using the existing metadata."""
@@ -635,13 +718,14 @@ class File(QtCore.QObject, Item):
         self.clear_lookup_task()
         metadata = self.metadata
         self.set_pending()
-        self.lookup_task = self.tagger.mb_api.find_tracks(partial(self._lookup_finished, 'metadata'),
+        self.lookup_task = self.tagger.mb_api.find_tracks(
+            partial(self._lookup_finished, File.LOOKUP_METADATA),
             track=metadata['title'],
             artist=metadata['artist'],
             release=metadata['album'],
             tnum=metadata['tracknumber'],
             tracks=metadata['totaltracks'],
-            qdur=string_(metadata.length // 2000),
+            qdur=str(metadata.length // 2000),
             isrc=metadata['isrc'],
             limit=QUERY_LIMIT)
 
@@ -653,28 +737,102 @@ class File(QtCore.QObject, Item):
     def set_pending(self):
         if self.state != File.REMOVED:
             self.state = File.PENDING
-            self.update()
+            self.update_item()
 
-    def clear_pending(self, force_update=False):
+    def clear_pending(self):
         if self.state == File.PENDING:
             self.state = File.NORMAL
-            self.update()
-        elif force_update:
-            self.update()
+            self.update_item()
+
+    def update_item(self):
+        if self.item:
+            self.item.update()
 
     def iterfiles(self, save=False):
         yield self
 
-    def _get_tracknumber(self):
+    @property
+    def tracknumber(self):
+        """The track number as an int."""
         try:
-            return self.metadata["tracknumber"]
-        except:
+            return int(self.metadata["tracknumber"])
+        except BaseException:
             return 0
-    tracknumber = property(_get_tracknumber, doc="The track number as an int.")
 
-    def _get_discnumber(self):
+    @property
+    def discnumber(self):
+        """The disc number as an int."""
         try:
-            return self.metadata["discnumber"]
-        except:
+            return int(self.metadata["discnumber"])
+        except BaseException:
             return 0
-    discnumber = property(_get_discnumber, doc="The disc number as an int.")
+
+
+_file_post_load_processors = PluginFunctions(label='file_post_load_processors')
+_file_post_addition_to_track_processors = PluginFunctions(label='file_post_addition_to_track_processors')
+_file_post_removal_from_track_processors = PluginFunctions(label='file_post_removal_from_track_processors')
+_file_post_save_processors = PluginFunctions(label='file_post_save_processors')
+
+
+def register_file_post_load_processor(function, priority=PluginPriority.NORMAL):
+    """Registers a file-loaded processor.
+
+    Args:
+        function: function to call after file has been loaded, it will be passed the file object
+        priority: optional, PluginPriority.NORMAL by default
+    Returns:
+        None
+    """
+    _file_post_load_processors.register(function.__module__, function, priority)
+
+
+def register_file_post_addition_to_track_processor(function, priority=PluginPriority.NORMAL):
+    """Registers a file-added-to-track processor.
+
+    Args:
+        function: function to call after file addition, it will be passed the track and file objects
+        priority: optional, PluginPriority.NORMAL by default
+    Returns:
+        None
+    """
+    _file_post_addition_to_track_processors.register(function.__module__, function, priority)
+
+
+def register_file_post_removal_from_track_processor(function, priority=PluginPriority.NORMAL):
+    """Registers a file-removed-from-track processor.
+
+    Args:
+        function: function to call after file removal, it will be passed the track and file objects
+        priority: optional, PluginPriority.NORMAL by default
+    Returns:
+        None
+    """
+    _file_post_removal_from_track_processors.register(function.__module__, function, priority)
+
+
+def register_file_post_save_processor(function, priority=PluginPriority.NORMAL):
+    """Registers file saved processor.
+
+    Args:
+        function: function to call after save, it will be passed the file object
+        priority: optional, PluginPriority.NORMAL by default
+    Returns:
+        None
+    """
+    _file_post_save_processors.register(function.__module__, function, priority)
+
+
+def run_file_post_load_processors(file_object):
+    _file_post_load_processors.run(file_object)
+
+
+def run_file_post_addition_to_track_processors(track_object, file_object):
+    _file_post_addition_to_track_processors.run(track_object, file_object)
+
+
+def run_file_post_removal_from_track_processors(track_object, file_object):
+    _file_post_removal_from_track_processors.run(track_object, file_object)
+
+
+def run_file_post_save_processors(file_object):
+    _file_post_save_processors.run(file_object)

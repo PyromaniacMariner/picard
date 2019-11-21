@@ -99,10 +99,16 @@
            </property>
            <widget class="QListWidget" name="script_list">
             <property name="sizePolicy">
-             <sizepolicy hsizetype="Ignored" vsizetype="Expanding">
+             <sizepolicy hsizetype="MinimumExpanding" vsizetype="Expanding">
               <horstretch>0</horstretch>
               <verstretch>0</verstretch>
              </sizepolicy>
+            </property>
+            <property name="minimumSize">
+             <size>
+              <width>80</width>
+              <height>0</height>
+             </size>
             </property>
            </widget>
            <widget class="QWidget" name="formWidget" native="true">
@@ -133,7 +139,11 @@
               </widget>
              </item>
              <item>
-              <widget class="QTextEdit" name="tagger_script"/>
+              <widget class="QTextEdit" name="tagger_script">
+               <property name="acceptRichText">
+                <bool>false</bool>
+               </property>
+              </widget>
              </item>
             </layout>
            </widget>
@@ -170,6 +180,13 @@
    </item>
   </layout>
  </widget>
+ <tabstops>
+  <tabstop>enable_tagger_scripts</tabstop>
+  <tabstop>add_script</tabstop>
+  <tabstop>script_list</tabstop>
+  <tabstop>script_name</tabstop>
+  <tabstop>tagger_script</tabstop>
+ </tabstops>
  <resources/>
  <connections/>
 </ui>

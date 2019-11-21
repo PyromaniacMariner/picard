@@ -1,22 +1,18 @@
 # -*- coding: utf-8 -*-
-
-import sys
 import unittest
-from picard import (version_to_string,
-                    version_from_string,
-                    VersionError)
+
+from test.picardtestcase import PicardTestCase
+
+from picard import (
+    VersionError,
+    api_versions,
+    api_versions_tuple,
+    version_from_string,
+    version_to_string,
+)
 
 
-# assertLess is available since 2.7 only
-if sys.version_info[:2] == (2, 6):
-    def assertLess(self, a, b, msg=None):
-        if not a < b:
-            self.fail('%s not less than %s' % (repr(a), repr(b)))
-
-    unittest.TestCase.assertLess = assertLess
-
-
-class VersionsTest(unittest.TestCase):
+class VersionsTest(PicardTestCase):
 
     def test_version_conv_1(self):
         l, s = (0, 0, 1, 'dev', 1), '0.0.1.dev1'
@@ -108,15 +104,20 @@ class VersionsTest(unittest.TestCase):
     def test_version_conv_20(self):
         self.assertRaises(VersionError, version_from_string, '123.')
 
+    @unittest.skipUnless(len(api_versions) > 1, "api_versions do not have enough elements")
     def test_api_versions_1(self):
-        "Check api versions format and order (from oldest to newest)"
-        from picard import api_versions
+        """Check api versions format and order (from oldest to newest)"""
 
-        len_api_versions = len(api_versions)
-        if len_api_versions > 1:
-            for i in xrange(len_api_versions - 1):
-                a = version_from_string(api_versions[i])
-                b = version_from_string(api_versions[i+1])
-                self.assertLess(a, b)
-        elif len_api_versions == 1:
-            a = version_from_string(api_versions[0])
+        for i in range(len(api_versions) - 1):
+            a = version_from_string(api_versions[i])
+            b = version_from_string(api_versions[i+1])
+            self.assertLess(a, b)
+
+    @unittest.skipUnless(len(api_versions_tuple) > 1, "api_versions_tuple do not have enough elements")
+    def test_api_versions_tuple_1(self):
+        """Check api versions format and order (from oldest to newest)"""
+
+        for i in range(len(api_versions_tuple) - 1):
+            a = api_versions_tuple[i]
+            b = api_versions_tuple[i+1]
+            self.assertLess(a, b)

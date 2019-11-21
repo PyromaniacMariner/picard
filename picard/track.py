@@ -18,18 +18,47 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 
+from collections import defaultdict
 from functools import partial
-from PyQt5 import QtCore
-from picard import config, log
-from picard.metadata import Metadata, run_track_metadata_processors
-from picard.dataobj import DataObject
-from picard.util.textencoding import asciipunct
-from picard.mbjson import recording_to_metadata
-from picard.script import ScriptParser
-from picard.const import VARIOUS_ARTISTS_ID, SILENCE_TRACK_TITLE, DATA_TRACK_TITLE
-from picard.ui.item import Item
-from picard.util.imagelist import update_metadata_images
+from itertools import filterfalse
+import re
 import traceback
+
+from PyQt5 import QtCore
+
+from picard import (
+    config,
+    log,
+)
+from picard.const import (
+    DATA_TRACK_TITLE,
+    SILENCE_TRACK_TITLE,
+    VARIOUS_ARTISTS_ID,
+)
+from picard.dataobj import DataObject
+from picard.file import (
+    run_file_post_addition_to_track_processors,
+    run_file_post_removal_from_track_processors,
+)
+from picard.mbjson import recording_to_metadata
+from picard.metadata import (
+    Metadata,
+    run_track_metadata_processors,
+)
+from picard.script import (
+    ScriptError,
+    ScriptParser,
+    enabled_tagger_scripts_texts,
+)
+from picard.util.imagelist import (
+    ImageList,
+    add_metadata_images,
+    remove_metadata_images,
+    update_metadata_images,
+)
+from picard.util.textencoding import asciipunct
+
+from picard.ui.item import Item
 
 
 _TRANSLATE_TAGS = {
@@ -39,9 +68,54 @@ _TRANSLATE_TAGS = {
 }
 
 
+class TagGenreFilter:
+
+    def __init__(self, filters):
+        self.errors = dict()
+        self.match_regexes = defaultdict(list)
+        for lineno, line in enumerate(filters.splitlines()):
+            line = line.strip()
+            if line and line[0] in ('+', '-'):
+                _list = line[0]
+                remain = line[1:].strip()
+                if not remain:
+                    continue
+                if len(remain) > 2 and remain[0] == '/' and remain[-1] == '/':
+                    remain = remain[1:-1]
+                    try:
+                        regex_search = re.compile(remain, re.IGNORECASE)
+                    except Exception as e:
+                        log.error("Failed to compile regex /%s/: %s", remain, e)
+                        self.errors[lineno] = str(e)
+                        regex_search = None
+                else:
+                    # FIXME?: only support '*' (not '?' or '[abc]')
+                    # replace multiple '*' by one
+                    star = re.escape('*')
+                    remain = re.sub(star + '+', '*', remain)
+                    regex = '.*'.join([re.escape(x) for x in remain.split('*')])
+                    regex_search = re.compile('^' + regex + '$', re.IGNORECASE)
+                if regex_search:
+                    self.match_regexes[_list].append(regex_search)
+
+    def skip(self, tag):
+        if not self.match_regexes:
+            return False
+        for regex in self.match_regexes['+']:
+            if regex.search(tag):
+                return False
+        for regex in self.match_regexes['-']:
+            if regex.search(tag):
+                return True
+        return False
+
+    def filter(self, list_of_tags):
+        return list(filterfalse(self.skip, list_of_tags))
+
+
 class TrackArtist(DataObject):
     def __init__(self, ta_id):
-        DataObject.__init__(self, ta_id)
+        super().__init__(ta_id)
 
 
 class Track(DataObject, Item):
@@ -55,6 +129,7 @@ class Track(DataObject, Item):
         self.num_linked_files = 0
         self.metadata = Metadata()
         self.orig_metadata = Metadata()
+        self.error = None
         self._track_artists = []
 
     def __repr__(self):
@@ -64,16 +139,17 @@ class Track(DataObject, Item):
         if file not in self.linked_files:
             self.linked_files.append(file)
             self.num_linked_files += 1
-        self.album._add_file(self, file)
         self.update_file_metadata(file)
+        add_metadata_images(self, [file])
+        self.album._add_file(self, file)
         file.metadata_images_changed.connect(self.update_orig_metadata_images)
+        run_file_post_addition_to_track_processors(self, file)
 
     def update_file_metadata(self, file):
         if file not in self.linked_files:
             return
         file.copy_metadata(self.metadata)
         file.metadata['~extension'] = file.orig_metadata['~extension']
-        file.metadata.changed = True
         file.update(signal=False)
         self.update()
 
@@ -82,15 +158,16 @@ class Track(DataObject, Item):
             return
         self.linked_files.remove(file)
         self.num_linked_files -= 1
-        file.copy_metadata(file.orig_metadata)
-        self.album._remove_file(self, file)
+        file.copy_metadata(file.orig_metadata, preserve_deleted=False)
         file.metadata_images_changed.disconnect(self.update_orig_metadata_images)
+        self.album._remove_file(self, file)
+        remove_metadata_images(self, [file])
+        run_file_post_removal_from_track_processors(self, file)
         self.update()
 
     def update(self):
         if self.item:
             self.item.update()
-        self.update_orig_metadata_images()
 
     def iterfiles(self, save=False):
         for file in self.linked_files:
@@ -144,9 +221,9 @@ class Track(DataObject, Item):
 
     def ignored_for_completeness(self):
         if (config.setting['completeness_ignore_videos'] and self.is_video()) \
-            or (config.setting['completeness_ignore_pregap'] and self.is_pregap()) \
-            or (config.setting['completeness_ignore_data'] and self.is_data()) \
-            or (config.setting['completeness_ignore_silence'] and self.is_silence()):
+                or (config.setting['completeness_ignore_pregap'] and self.is_pregap()) \
+                or (config.setting['completeness_ignore_data'] and self.is_data()) \
+                or (config.setting['completeness_ignore_silence'] and self.is_silence()):
             return True
         return False
 
@@ -170,7 +247,7 @@ class Track(DataObject, Item):
         if tm['title'] == SILENCE_TRACK_TITLE:
             tm['~silence'] = '1'
 
-        if config.setting['folksonomy_tags']:
+        if config.setting['use_genres']:
             self._convert_folksonomy_tags_to_genre()
 
         # Convert Unicode punctuation
@@ -179,18 +256,18 @@ class Track(DataObject, Item):
 
     def _convert_folksonomy_tags_to_genre(self):
         # Combine release and track tags
-        tags = dict(self.folksonomy_tags)
-        self.merge_folksonomy_tags(tags, self.album.folksonomy_tags)
+        tags = dict(self.genres)
+        self.merge_genres(tags, self.album.genres)
         if self.album.release_group:
-            self.merge_folksonomy_tags(tags, self.album.release_group.folksonomy_tags)
-        if not tags and config.setting['artists_tags']:
+            self.merge_genres(tags, self.album.release_group.genres)
+        if not tags and config.setting['artists_genres']:
             # For compilations use each track's artists to look up tags
             if self.metadata['musicbrainz_albumartistid'] == VARIOUS_ARTISTS_ID:
                 for artist in self._track_artists:
-                    self.merge_folksonomy_tags(tags, artist.folksonomy_tags)
+                    self.merge_genres(tags, artist.genres)
             else:
                 for artist in self.album.get_album_artists():
-                    self.merge_folksonomy_tags(tags, artist.folksonomy_tags)
+                    self.merge_genres(tags, artist.genres)
         # Ignore tags with zero or lower score
         tags = dict((name, count) for name, count in tags.items() if count > 0)
         if not tags:
@@ -202,28 +279,21 @@ class Track(DataObject, Item):
             taglist.append((100 * count // maxcount, name))
         taglist.sort(reverse=True)
         # And generate the genre metadata tag
-        maxtags = config.setting['max_tags']
-        minusage = config.setting['min_tag_usage']
-        ignore_tags = self._get_ignored_folksonomy_tags()
+        maxtags = config.setting['max_genres']
+        minusage = config.setting['min_genre_usage']
+        tag_filter = TagGenreFilter(config.setting['genres_filter'])
         genre = []
         for usage, name in taglist[:maxtags]:
-            if name.lower() in ignore_tags:
+            if tag_filter.skip(name):
                 continue
             if usage < minusage:
                 break
             name = _TRANSLATE_TAGS.get(name, name.title())
             genre.append(name)
-        join_tags = config.setting['join_tags']
-        if join_tags:
-            genre = [join_tags.join(genre)]
+        join_genres = config.setting['join_genres']
+        if join_genres:
+            genre = [join_genres.join(genre)]
         self.metadata['genre'] = genre
-
-    def _get_ignored_folksonomy_tags(self):
-        tags = []
-        ignore_tags = config.setting['ignore_tags']
-        if ignore_tags:
-            tags = [s.strip().lower() for s in ignore_tags.split(',')]
-        return tags
 
     def update_orig_metadata_images(self):
         update_metadata_images(self)
@@ -231,85 +301,98 @@ class Track(DataObject, Item):
     def keep_original_images(self):
         for file in self.linked_files:
             file.keep_original_images()
+        self.update_orig_metadata_images()
         if self.linked_files:
-            self.update_orig_metadata_images()
-            self.metadata.images = self.orig_metadata.images[:]
+            self.metadata.images = self.orig_metadata.images.copy()
         else:
-            self.metadata.images = []
+            self.metadata.images = ImageList()
         self.update()
 
 
 class NonAlbumTrack(Track):
 
     def __init__(self, nat_id):
-        Track.__init__(self, nat_id, self.tagger.nats)
+        super().__init__(nat_id, self.tagger.nats)
         self.callback = None
         self.loaded = False
+        self.status = None
 
     def can_refresh(self):
         return True
 
     def column(self, column):
         if column == "title":
-            return self.metadata["title"]
-        return Track.column(self, column)
+            if self.status is not None:
+                return self.status
+            else:
+                return self.metadata['title']
+        return super().column(column)
 
     def load(self, priority=False, refresh=False):
-        self.metadata.copy(self.album.metadata)
-        self.metadata["title"] = "[loading track information]"
+        self.metadata.copy(self.album.metadata, copy_images=False)
+        self.status = _("[loading recording information]")
+        self.error = None
         self.loaded = False
-        self.tagger.nats.update(True)
+        self.album.update(True)
         mblogin = False
         inc = ["artist-credits", "artists", "aliases"]
         if config.setting["track_ars"]:
             inc += ["artist-rels", "url-rels", "recording-rels",
                     "work-rels", "work-level-rels"]
-        if config.setting["folksonomy_tags"]:
-            if config.setting["only_my_tags"]:
-                mblogin = True
-                inc += ["user-tags"]
-            else:
-                inc += ["tags"]
+        mblogin = self.set_genre_inc_params(inc) or mblogin
         if config.setting["enable_ratings"]:
             mblogin = True
             inc += ["user-ratings"]
         self.tagger.mb_api.get_track_by_id(self.id,
-                                          partial(self._recording_request_finished),
-                                          inc, mblogin=mblogin,
-                                          priority=priority,
-                                          refresh=refresh)
+                                           partial(self._recording_request_finished),
+                                           inc, mblogin=mblogin,
+                                           priority=priority,
+                                           refresh=refresh)
+
+    def can_remove(self):
+        return True
 
     def _recording_request_finished(self, recording, http, error):
         if error:
-            log.error("%r", http.errorString())
+            self._set_error(http.errorString())
             return
         try:
             self._parse_recording(recording)
             for file in self.linked_files:
                 self.update_file_metadata(file)
         except Exception:
-            log.error(traceback.format_exc())
+            self._set_error(traceback.format_exc())
+
+    def _set_error(self, error):
+        log.error("%r", error)
+        self.status = _("[could not load recording %s]") % self.id
+        self.error = error
+        self.album.update(True)
 
     def _parse_recording(self, recording):
         m = self.metadata
         recording_to_metadata(recording, m, self)
+        self.orig_metadata.copy(m)
         self._customize_metadata()
-        run_track_metadata_processors(self.album, m, None, recording)
-        if config.setting["enable_tagger_scripts"]:
-            for s_pos, s_name, s_enabled, s_text in config.setting["list_of_scripts"]:
-                if s_enabled and s_text:
-                    parser = ScriptParser()
-                    try:
-                        parser.eval(s_text, m)
-                    except:
-                        log.error(traceback.format_exc())
-                    m.strip_whitespace()
+        run_track_metadata_processors(self.album, m, recording)
+        for s_name, s_text in enabled_tagger_scripts_texts():
+            parser = ScriptParser()
+            try:
+                parser.eval(s_text, m)
+            except ScriptError:
+                log.exception("Failed to run tagger script %s on track", s_name)
+            m.strip_whitespace()
 
         self.loaded = True
+        self.status = None
         if self.callback:
             self.callback()
             self.callback = None
-        self.tagger.nats.update(True)
+        self.album.update(True)
+
+    def _customize_metadata(self):
+        super()._customize_metadata()
+        self.metadata['album'] = self.album.metadata['album']
 
     def run_when_loaded(self, func):
         if self.loaded:

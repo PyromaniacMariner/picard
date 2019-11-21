@@ -18,7 +18,19 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 
-from mutagen.id3 import ID3, Frames, Frames_2_2, TextFrame
+from mutagen.id3 import (
+    ID3,
+    Frames,
+    Frames_2_2,
+    TextFrame,
+)
+
+
+try:
+    from mutagen.id3 import GRP1
+except ImportError:
+    class GRP1(TextFrame):
+        pass
 
 
 class TCMP(TextFrame):
@@ -41,6 +53,16 @@ class XSOP(TextFrame):
     pass
 
 
+known_frames = dict(Frames)
+known_frames.update(dict(Frames_2_2))
+known_frames["GRP1"] = GRP1
+known_frames["TCMP"] = TCMP
+known_frames["TSO2"] = TSO2
+known_frames["TSOC"] = TSOC
+known_frames["XDOR"] = XDOR
+known_frames["XSOP"] = XSOP
+
+
 class CompatID3(ID3):
 
     """
@@ -53,15 +75,8 @@ class CompatID3(ID3):
 
     def __init__(self, *args, **kwargs):
         if args:
-            known_frames = dict(Frames)
-            known_frames.update(dict(Frames_2_2))
-            known_frames["TCMP"] = TCMP
-            known_frames["TSO2"] = TSO2
-            known_frames["TSOC"] = TSOC
-            known_frames["XDOR"] = XDOR
-            known_frames["XSOP"] = XSOP
             kwargs["known_frames"] = known_frames
-        super(CompatID3, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
     def update_to_v23(self):
         # leave TSOP, TSOA and TSOT even though they are officially defined
@@ -69,6 +84,6 @@ class CompatID3(ID3):
         frames = []
         for key in ["TSOP", "TSOA", "TSOT", "TSST"]:
             frames.extend(self.getall(key))
-        super(CompatID3, self).update_to_v23()
+        super().update_to_v23()
         for frame in frames:
             self.add(frame)

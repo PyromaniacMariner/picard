@@ -22,7 +22,18 @@ import re
 import struct
 import sys
 import unicodedata
-from picard.util import _io_encoding, decode_filename, encode_filename
+
+from PyQt5.QtCore import QStandardPaths
+
+from picard.const.sys import (
+    IS_MACOS,
+    IS_WIN,
+)
+from picard.util import (
+    _io_encoding,
+    decode_filename,
+    encode_filename,
+)
 
 
 def _get_utf16_length(text):
@@ -78,8 +89,9 @@ def _shorten_to_utf16_nfd_length(text, length):
         pass
     return unicodedata.normalize('NFC', newtext)
 
+
 _re_utf8 = re.compile(r'^utf([-_]?8)$', re.IGNORECASE)
-def _shorten_to_bytes_length(text, length):
+def _shorten_to_bytes_length(text, length):  # noqa: E302
     """Truncates a unicode object to the given number of bytes it would take
     when encoded in the "filesystem encoding".
     """
@@ -113,7 +125,7 @@ def _shorten_to_bytes_length(text, length):
 
 
 SHORTEN_BYTES, SHORTEN_UTF16, SHORTEN_UTF16_NFD = 0, 1, 2
-def shorten_filename(filename, length, mode):
+def shorten_filename(filename, length, mode):  # noqa: E302
     """Truncates a filename to the given number of thingies,
     as implied by `mode`.
     """
@@ -134,7 +146,8 @@ def shorten_path(path, length, mode):
     length: Maximum number of code points / bytes allowed in a node.
     mode: One of SHORTEN_BYTES, SHORTEN_UTF16, SHORTEN_UTF16_NFD.
     """
-    shorten = lambda n, l: n and shorten_filename(n, l, mode).strip() or ""
+    def shorten(n, l):
+        return n and shorten_filename(n, l, mode).strip() or ""
     dirpath, filename = os.path.split(path)
     fileroot, ext = os.path.splitext(filename)
     return os.path.join(
@@ -181,7 +194,8 @@ def _make_win_short_filename(relpath, reserved=0):
     remaining = MAX_DIRPATH_LEN - reserved
 
     # to make things more readable...
-    shorten = lambda p, l: shorten_path(p, l, mode=SHORTEN_UTF16)
+    def shorten(p, l):
+        return shorten_path(p, l, mode=SHORTEN_UTF16)
     xlength = _get_utf16_length
 
     # shorten to MAX_NODE_LEN from the beginning
@@ -264,6 +278,7 @@ def _get_mount_point(target):
         mounts[target] = mount
     return mount
 
+
 # NOTE: this could be merged with the function above, and get all needed info
 # in a single call, returning the filesystem type as well. (but python's
 # posix.statvfs_result doesn't implement f_fsid)
@@ -301,7 +316,12 @@ def make_short_filename(basedir, relpath, win_compat=False, relative_to=""):
     """
     # only deal with absolute paths. it saves a lot of grief,
     # and is the right thing to do, even for renames.
-    basedir = os.path.abspath(basedir)
+    try:
+        basedir = os.path.abspath(basedir)
+    except FileNotFoundError:
+        # os.path.abspath raises an exception if basedir is a relative path and
+        # cwd doesn't exist anymore
+        basedir = QStandardPaths.writableLocation(QStandardPaths.MusicLocation)
     # also, make sure the relative path is clean
     relpath = os.path.normpath(relpath)
     if win_compat and relative_to:
@@ -312,7 +332,7 @@ def make_short_filename(basedir, relpath, win_compat=False, relative_to=""):
     # always strip the relpath parts
     relpath = os.path.join(*[part.strip() for part in relpath.split(os.path.sep)])
     # if we're on windows, delegate the work to a windows-specific function
-    if sys.platform == "win32":
+    if IS_WIN:
         reserved = len(basedir)
         if not basedir.endswith(os.path.sep):
             reserved += 1
@@ -333,7 +353,7 @@ def make_short_filename(basedir, relpath, win_compat=False, relative_to=""):
         relpath = _make_win_short_filename(relpath, reserved)
     # on *nix we can consider there is no path limit, but there is
     # a filename length limit.
-    if sys.platform == "darwin":
+    if IS_MACOS:
         # on OS X (i.e. HFS+), this is expressed in UTF-16 code points,
         # in NFD normalization form
         relpath = shorten_path(relpath, 255, mode=SHORTEN_UTF16_NFD)

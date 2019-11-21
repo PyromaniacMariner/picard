@@ -18,20 +18,36 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 
-from __future__ import print_function
-import re
+from collections import defaultdict
+from heapq import (
+    heappop,
+    heappush,
+)
 import ntpath
-import sys
-from operator import itemgetter
-from heapq import heappush, heappop
+import re
+
 from PyQt5 import QtCore
+
 from picard import config
-from picard.metadata import Metadata
-from picard.similarity import similarity
-from picard.ui.item import Item
-from picard.util import format_time, album_artist_from_path
-from picard.util.imagelist import update_metadata_images
 from picard.const import QUERY_LIMIT
+from picard.const.sys import IS_WIN
+from picard.metadata import (
+    Metadata,
+    SimMatchRelease,
+)
+from picard.similarity import similarity
+from picard.util import (
+    album_artist_from_path,
+    find_best_match,
+    format_time,
+)
+from picard.util.imagelist import (
+    add_metadata_images,
+    remove_metadata_images,
+    update_metadata_images,
+)
+
+from picard.ui.item import Item
 
 
 class Cluster(QtCore.QObject, Item):
@@ -57,21 +73,25 @@ class Cluster(QtCore.QObject, Item):
         self.related_album = related_album
         self.files = []
         self.lookup_task = None
+        self.update_metadata_images_enabled = True
 
     def __repr__(self):
         if self.related_album:
             return '<Cluster %s %r>' % (
                 self.related_album.id,
                 self.related_album.metadata[u"album"] + '/' + self.metadata['album']
-                )
+            )
         return '<Cluster %r>' % self.metadata['album']
 
     def __len__(self):
         return len(self.files)
 
-    def _update_related_album(self):
+    def _update_related_album(self, added_files=None, removed_files=None):
         if self.related_album:
-            self.related_album.update_metadata_images()
+            if added_files:
+                add_metadata_images(self.related_album, added_files)
+            if removed_files:
+                remove_metadata_images(self.related_album, removed_files)
             self.related_album.update()
 
     def add_files(self, files):
@@ -79,25 +99,17 @@ class Cluster(QtCore.QObject, Item):
             self.metadata.length += file.metadata.length
             file._move(self)
             file.update(signal=False)
-            cover = file.metadata.get_single_front_image()
-            if cover and cover[0] not in self.metadata.images:
-                self.metadata.append_image(cover[0])
+            if self.can_show_coverart:
+                file.metadata_images_changed.connect(self.update_metadata_images)
         self.files.extend(files)
         self.metadata['totaltracks'] = len(self.files)
         self.item.add_files(files)
-        self._update_related_album()
+        if self.can_show_coverart:
+            add_metadata_images(self, files)
+        self._update_related_album(added_files=files)
 
     def add_file(self, file):
-        self.metadata.length += file.metadata.length
-        self.files.append(file)
-        self.metadata['totaltracks'] = len(self.files)
-        file._move(self)
-        file.update(signal=False)
-        cover = file.metadata.get_single_front_image()
-        if cover and cover[0] not in self.metadata.images:
-            self.metadata.append_image(cover[0])
-        self.item.add_file(file)
-        self._update_related_album()
+        self.add_files([file])
 
     def remove_file(self, file):
         self.metadata.length -= file.metadata.length
@@ -106,8 +118,10 @@ class Cluster(QtCore.QObject, Item):
         self.item.remove_file(file)
         if not self.special and self.get_num_files() == 0:
             self.tagger.remove_cluster(self)
-        self.update_metadata_images()
-        self._update_related_album()
+        if self.can_show_coverart:
+            file.metadata_images_changed.disconnect(self.update_metadata_images)
+            remove_metadata_images(self, [file])
+        self._update_related_album(removed_files=[file])
 
     def update(self):
         if self.item:
@@ -176,37 +190,37 @@ class Cluster(QtCore.QObject, Item):
         except (KeyError, TypeError):
             releases = None
 
-        mparms = {
-            'album': self.metadata['album']
-        }
-
-        # no matches
-        if not releases:
+        def statusbar(message):
             self.tagger.window.set_statusbar_message(
-                N_("No matching releases for cluster %(album)s"),
-                mparms,
+                message,
+                {'album': self.metadata['album']},
                 timeout=3000
             )
-            return
 
+        if releases:
+            albumid = self._match_to_album(releases, threshold=config.setting['cluster_lookup_threshold'])
+        else:
+            albumid = None
+
+        if albumid is None:
+            statusbar(N_("No matching releases for cluster %(album)s"))
+        else:
+            statusbar(N_("Cluster %(album)s identified!"))
+            self.tagger.move_files_to_album(self.files, albumid)
+
+    def _match_to_album(self, releases, threshold=0):
         # multiple matches -- calculate similarities to each of them
-        match = sorted((self.metadata.compare_to_release(
-            release, Cluster.comparison_weights) for release in releases),
-            reverse=True, key=itemgetter(0))[0]
+        def candidates():
+            for release in releases:
+                yield self.metadata.compare_to_release(release, Cluster.comparison_weights)
 
-        if match[0] < config.setting['cluster_lookup_threshold']:
-            self.tagger.window.set_statusbar_message(
-                N_("No matching releases for cluster %(album)s"),
-                mparms,
-                timeout=3000
-            )
-            return
-        self.tagger.window.set_statusbar_message(
-            N_("Cluster %(album)s identified!"),
-            mparms,
-            timeout=3000
-        )
-        self.tagger.move_files_to_album(self.files, match[1]['id'])
+        no_match = SimMatchRelease(similarity=-1, release=None)
+        best_match = find_best_match(candidates, no_match)
+
+        if best_match.similarity < threshold:
+            return None
+        else:
+            return best_match.result.release['id']
 
     def lookup_metadata(self):
         """Try to identify the cluster using the existing metadata."""
@@ -219,7 +233,7 @@ class Cluster(QtCore.QObject, Item):
         self.lookup_task = self.tagger.mb_api.find_releases(self._lookup_finished,
             artist=self.metadata['albumartist'],
             release=self.metadata['album'],
-            tracks=string_(len(self.files)),
+            tracks=str(len(self.files)),
             limit=QUERY_LIMIT)
 
     def clear_lookup_task(self):
@@ -229,46 +243,46 @@ class Cluster(QtCore.QObject, Item):
 
     @staticmethod
     def cluster(files, threshold):
-        artistDict = ClusterDict()
-        albumDict = ClusterDict()
+        win_compat = config.setting["windows_compatibility"] or IS_WIN
+        artist_dict = ClusterDict()
+        album_dict = ClusterDict()
         tracks = []
         for file in files:
             artist = file.metadata["albumartist"] or file.metadata["artist"]
             album = file.metadata["album"]
             # Improve clustering from directory structure if no existing tags
             # Only used for grouping and to provide cluster title / artist - not added to file tags.
-            filename = file.filename
-            if config.setting["windows_compatibility"] or sys.platform == "win32":
-                filename = ntpath.splitdrive(filename)[1]
+            if win_compat:
+                filename = ntpath.splitdrive(file.filename)[1]
+            else:
+                filename = file.filename
             album, artist = album_artist_from_path(filename, album, artist)
             # For each track, record the index of the artist and album within the clusters
-            tracks.append((artistDict.add(artist),
-                           albumDict.add(album)))
+            tracks.append((artist_dict.add(artist), album_dict.add(album)))
 
-        artist_cluster_engine = ClusterEngine(artistDict)
+        artist_cluster_engine = ClusterEngine(artist_dict)
         artist_cluster_engine.cluster(threshold)
 
-        album_cluster_engine = ClusterEngine(albumDict)
+        album_cluster_engine = ClusterEngine(album_dict)
         album_cluster_engine.cluster(threshold)
 
         # Arrange tracks into albums
         albums = {}
         for i, track in enumerate(tracks):
-            cluster = album_cluster_engine.getClusterFromId(track[1])
+            cluster = album_cluster_engine.get_cluster_from_id(track[1])
             if cluster is not None:
                 albums.setdefault(cluster, []).append(i)
 
         # Now determine the most prominent names in the cluster and build the
         # final cluster list
         for album_id, album in albums.items():
-            album_name = album_cluster_engine.getClusterTitle(album_id)
+            album_name = album_cluster_engine.get_cluster_title(album_id)
 
             artist_max = 0
             artist_id = None
             artist_hist = {}
             for track_id in album:
-                cluster = artist_cluster_engine.getClusterFromId(
-                    tracks[track_id][0])
+                cluster = artist_cluster_engine.get_cluster_from_id(tracks[track_id][0])
                 if cluster is not None:
                     cnt = artist_hist.get(cluster, 0) + 1
                     if cnt > artist_max:
@@ -279,12 +293,16 @@ class Cluster(QtCore.QObject, Item):
             if artist_id is None:
                 artist_name = "Various Artists"
             else:
-                artist_name = artist_cluster_engine.getClusterTitle(artist_id)
+                artist_name = artist_cluster_engine.get_cluster_title(artist_id)
 
             yield album_name, artist_name, (files[i] for i in album)
 
+    def enable_update_metadata_images(self, enabled):
+        self.update_metadata_images_enabled = enabled
+
     def update_metadata_images(self):
-        update_metadata_images(self)
+        if self.update_metadata_images_enabled and self.can_show_coverart:
+            update_metadata_images(self)
 
 
 class UnclusteredFiles(Cluster):
@@ -292,18 +310,18 @@ class UnclusteredFiles(Cluster):
     """Special cluster for 'Unmatched Files' which have no PUID and have not been clustered."""
 
     def __init__(self):
-        super(UnclusteredFiles, self).__init__(_("Unclustered Files"), special=True)
+        super().__init__(_("Unclustered Files"), special=True)
 
     def add_files(self, files):
-        Cluster.add_files(self, files)
+        super().add_files(files)
         self.tagger.window.enable_cluster(self.get_num_files() > 0)
 
     def add_file(self, file):
-        Cluster.add_file(self, file)
+        super().add_file(file)
         self.tagger.window.enable_cluster(self.get_num_files() > 0)
 
     def remove_file(self, file):
-        Cluster.remove_file(self, file)
+        super().remove_file(file)
         self.tagger.window.enable_cluster(self.get_num_files() > 0)
 
     def lookup_metadata(self):
@@ -319,7 +337,11 @@ class UnclusteredFiles(Cluster):
         return False
 
     def can_remove(self):
-        return True
+        return len(self.files) > 0
+
+    @property
+    def can_show_coverart(self):
+        return False
 
 
 class ClusterList(list, Item):
@@ -327,7 +349,7 @@ class ClusterList(list, Item):
     """A list of clusters."""
 
     def __init__(self):
-        super(ClusterList, self).__init__()
+        super().__init__()
 
     def __hash__(self):
         return id(self)
@@ -358,20 +380,21 @@ class ClusterDict(object):
 
     def __init__(self):
         # word -> id index
-        self.words = {}
+        self.words = defaultdict(lambda: (-1, 0))
         # id -> word, token index
-        self.ids = {}
+        self.ids = defaultdict(lambda: (None, None))
         # counter for new id generation
         self.id = 0
         self.regexp = re.compile(r'\W', re.UNICODE)
         self.spaces = re.compile(r'\s', re.UNICODE)
 
-    def getSize(self):
+    def get_size(self):
         return self.id
 
     def tokenize(self, word):
-        token = self.regexp.sub('', word.lower())
-        return token if token else self.spaces.sub('', word.lower())
+        word = word.lower()
+        token = self.regexp.sub('', word)
+        return token if token else self.spaces.sub('', word)
 
     def add(self, word):
         """
@@ -383,80 +406,56 @@ class ClusterDict(object):
         if word == '':
             return -1
 
-        token = self.tokenize(word)
-        if token == '':
-            return -1
-
-        try:
-            index, count = self.words[word]
-            self.words[word] = (index, count + 1)
-        except KeyError:
+        index, count = self.words[word]
+        if index == -1:
+            token = self.tokenize(word)
+            if token == '':
+                return -1
             index = self.id
-            self.words[word] = (self.id, 1)
             self.ids[index] = (word, token)
             self.id = self.id + 1
+        self.words[word] = (index, count + 1)
 
         return index
 
-    def getWord(self, index):
-        word = None
-        try:
-            word, token = self.ids[index]
-        except KeyError:
-            pass
+    def get_word(self, index):
+        word, token = self.ids[index]
         return word
 
-    def getToken(self, index):
-        token = None
-        try:
-            word, token = self.ids[index]
-        except KeyError:
-            pass
+    def get_token(self, index):
+        word, token = self.ids[index]
         return token
 
-    def getWordAndCount(self, index):
-        word = None
-        count = 0
-        try:
-            word, token = self.ids[index]
-            index, count = self.words[word]
-        except KeyError:
-            pass
+    def get_word_and_count(self, index):
+        word, unused = self.ids[index]
+        unused, count = self.words[word]
         return word, count
 
 
 class ClusterEngine(object):
 
-    def __init__(self, clusterDict):
+    def __init__(self, cluster_dict):
         # the cluster dictionary we're using
-        self.clusterDict = clusterDict
+        self.cluster_dict = cluster_dict
         # keeps track of unique cluster index
-        self.clusterCount = 0
+        self.cluster_count = 0
         # Keeps track of the clusters we've created
-        self.clusterBins = {}
+        self.cluster_bins = {}
         # Index the word ids -> clusters
-        self.idClusterIndex = {}
+        self.index_id_cluster = {}
 
-    def getClusterFromId(self, id):
-        return self.idClusterIndex.get(id)
+    def get_cluster_from_id(self, clusterid):
+        return self.index_id_cluster.get(clusterid)
 
-    def printCluster(self, cluster):
-        if cluster < 0:
-            print("[no such cluster]")
-            return
-
-        cluster_bin = self.clusterBins[cluster]
-        print(cluster, " -> ", ", ".join([("'" + self.clusterDict.getWord(i) + "'") for i in cluster_bin]))
-
-    def getClusterTitle(self, cluster):
+    def get_cluster_title(self, cluster):
 
         if cluster < 0:
             return ""
 
         cluster_max = 0
         maxWord = ''
-        for cluster_bin in self.clusterBins[cluster]:
-            word, count = self.clusterDict.getWordAndCount(cluster_bin)
+        for cluster_bin in self.cluster_bins[cluster]:
+            word, count = self.cluster_dict.get_word_and_count(cluster_bin)
             if count >= cluster_max:
                 maxWord = word
                 cluster_max = count
@@ -468,62 +467,63 @@ class ClusterEngine(object):
         # Keep the matches sorted in a heap
         heap = []
 
-        for y in range(self.clusterDict.getSize()):
+        for y in range(self.cluster_dict.get_size()):
+            token_y = self.cluster_dict.get_token(y).lower()
             for x in range(y):
                 if x != y:
-                    c = similarity(self.clusterDict.getToken(x).lower(),
-                                   self.clusterDict.getToken(y).lower())
+                    token_x = self.cluster_dict.get_token(x).lower()
+                    c = similarity(token_x, token_y)
                     if c >= threshold:
                         heappush(heap, ((1.0 - c), [x, y]))
             QtCore.QCoreApplication.processEvents()
 
-        for i in range(self.clusterDict.getSize()):
-            word, count = self.clusterDict.getWordAndCount(i)
+        for i in range(self.cluster_dict.get_size()):
+            word, count = self.cluster_dict.get_word_and_count(i)
             if word and count > 1:
-                self.clusterBins[self.clusterCount] = [i]
-                self.idClusterIndex[i] = self.clusterCount
-                self.clusterCount = self.clusterCount + 1
+                self.cluster_bins[self.cluster_count] = [i]
+                self.index_id_cluster[i] = self.cluster_count
+                self.cluster_count = self.cluster_count + 1
 
         for i in range(len(heap)):
             c, pair = heappop(heap)
             c = 1.0 - c
 
             try:
-                match0 = self.idClusterIndex[pair[0]]
-            except:
+                match0 = self.index_id_cluster[pair[0]]
+            except BaseException:
                 match0 = -1
 
             try:
-                match1 = self.idClusterIndex[pair[1]]
-            except:
+                match1 = self.index_id_cluster[pair[1]]
+            except BaseException:
                 match1 = -1
 
             # if neither item is in a cluster, make a new cluster
             if match0 == -1 and match1 == -1:
-                self.clusterBins[self.clusterCount] = [pair[0], pair[1]]
-                self.idClusterIndex[pair[0]] = self.clusterCount
-                self.idClusterIndex[pair[1]] = self.clusterCount
-                self.clusterCount = self.clusterCount + 1
+                self.cluster_bins[self.cluster_count] = [pair[0], pair[1]]
+                self.index_id_cluster[pair[0]] = self.cluster_count
+                self.index_id_cluster[pair[1]] = self.cluster_count
+                self.cluster_count = self.cluster_count + 1
                 continue
 
             # If cluster0 is in a bin, stick the other match into that bin
             if match0 >= 0 and match1 < 0:
-                self.clusterBins[match0].append(pair[1])
-                self.idClusterIndex[pair[1]] = match0
+                self.cluster_bins[match0].append(pair[1])
+                self.index_id_cluster[pair[1]] = match0
                 continue
 
             # If cluster1 is in a bin, stick the other match into that bin
             if match1 >= 0 and match0 < 0:
-                self.clusterBins[match1].append(pair[0])
-                self.idClusterIndex[pair[0]] = match1
+                self.cluster_bins[match1].append(pair[0])
+                self.index_id_cluster[pair[0]] = match1
                 continue
 
             # If both matches are already in two different clusters, merge the clusters
             if match1 != match0:
-                self.clusterBins[match0].extend(self.clusterBins[match1])
-                for match in self.clusterBins[match1]:
-                    self.idClusterIndex[match] = match0
-                del self.clusterBins[match1]
+                self.cluster_bins[match0].extend(self.cluster_bins[match1])
+                for match in self.cluster_bins[match1]:
+                    self.index_id_cluster[match] = match0
+                del self.cluster_bins[match1]
 
     def can_refresh(self):
         return False
