@@ -1,7 +1,14 @@
 # -*- coding: utf-8 -*-
 #
 # Picard, the next-generation MusicBrainz tagger
-# Copyright (C) 2006 Lukáš Lalinský
+#
+# Copyright (C) 2006-2007 Lukáš Lalinský
+# Copyright (C) 2010, 2018-2019 Philipp Wolfer
+# Copyright (C) 2012, 2014 Wieland Hoffmann
+# Copyright (C) 2012-2014 Michael Wiencek
+# Copyright (C) 2013-2015, 2018-2019 Laurent Monin
+# Copyright (C) 2016-2018 Sambhav Kothari
+# Copyright (C) 2017 Suhas
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -16,6 +23,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
+
 
 from picard import config
 from picard.coverart.providers import cover_art_providers
@@ -36,6 +44,7 @@ class CoverOptionsPage(OptionsPage):
     PARENT = None
     SORT_ORDER = 35
     ACTIVE = True
+    HELP_URL = '/config/options_cover.html'
 
     options = [
         config.BoolOption("setting", "save_images_to_tags", True),
@@ -45,8 +54,7 @@ class CoverOptionsPage(OptionsPage):
         config.BoolOption("setting", "save_images_overwrite", False),
         config.ListOption("setting", "ca_providers", [
             ('Cover Art Archive', True),
-            ('Amazon', True),
-            ('Whitelist', True),
+            ('UrlRelationships', True),
             ('CaaReleaseGroup', False),
             ('Local', False),
         ]),

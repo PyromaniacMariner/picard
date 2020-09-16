@@ -1,7 +1,12 @@
 # -*- coding: utf-8 -*-
 #
 # Picard, the next-generation MusicBrainz tagger
-# Copyright (C) 2006 Lukáš Lalinský
+#
+# Copyright (C) 2006-2007 Lukáš Lalinský
+# Copyright (C) 2009 Nikolai Prokoschenko
+# Copyright (C) 2009, 2019-2020 Philipp Wolfer
+# Copyright (C) 2013, 2015, 2018-2019 Laurent Monin
+# Copyright (C) 2016-2017 Sambhav Kothari
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -16,6 +21,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
+
 
 import re
 
@@ -37,12 +43,23 @@ class OptionsPage(QtWidgets.QWidget):
     PARENT = None
     SORT_ORDER = 1000
     ACTIVE = True
+    HELP_URL = None
     STYLESHEET_ERROR = "QWidget { background-color: #f55; color: white; font-weight:bold }"
     STYLESHEET = "QLabel { qproperty-wordWrap: true; }"
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.setStyleSheet(self.STYLESHEET)
+
+        # Keep track whether the options page has been destroyed to avoid
+        # trying to update deleted UI widgets after plugin list refresh.
+        self.deleted = False
+
+        # The on destroyed cannot be created as a method on this class or it will never get called.
+        # See https://stackoverflow.com/questions/16842955/widgets-destroyed-signal-is-not-fired-pyqt
+        def on_destroyed(obj=None):
+            self.deleted = True
+        self.destroyed.connect(on_destroyed)
 
     def check(self):
         pass

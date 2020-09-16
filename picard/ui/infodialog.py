@@ -1,7 +1,17 @@
 # -*- coding: utf-8 -*-
 #
 # Picard, the next-generation MusicBrainz tagger
+#
 # Copyright (C) 2006 Lukáš Lalinský
+# Copyright (C) 2011-2014 Michael Wiencek
+# Copyright (C) 2012-2014, 2017, 2019 Wieland Hoffmann
+# Copyright (C) 2013-2014, 2018-2019 Laurent Monin
+# Copyright (C) 2014, 2017 Sophist-UK
+# Copyright (C) 2016 Rahul Raturi
+# Copyright (C) 2016-2017 Sambhav Kothari
+# Copyright (C) 2017-2019 Antonio Larrosa
+# Copyright (C) 2018 Vishal Choudhary
+# Copyright (C) 2018-2019 Philipp Wolfer
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -17,7 +27,11 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 
-from collections import namedtuple
+
+from collections import (
+    defaultdict,
+    namedtuple,
+)
 import os.path
 import re
 import traceback
@@ -276,6 +290,48 @@ def format_file_info(file_):
                              htmlescape(i[1])), info))
 
 
+def format_tracklist(cluster):
+    info = []
+    info.append("<b>%s</b> %s" % (_('Album:'),
+                                  htmlescape(cluster.metadata["album"])))
+    info.append("<b>%s</b> %s" % (_('Artist:'),
+                                  htmlescape(cluster.metadata["albumartist"])))
+    info.append("")
+    TrackListItem = namedtuple('TrackListItem', 'number, title, artist, length')
+    tracklists = defaultdict(list)
+    if isinstance(cluster, Album):
+        objlist = cluster.tracks
+    else:
+        objlist = cluster.iterfiles(False)
+    for obj_ in objlist:
+        m = obj_.metadata
+        artist = m["artist"] or m["albumartist"] or cluster.metadata["albumartist"]
+        track = TrackListItem(m["tracknumber"], m["title"], artist,
+                              m["~length"])
+        tracklists[obj_.discnumber].append(track)
+
+    def sorttracknum(track):
+        try:
+            return int(track.number)
+        except ValueError:
+            try:
+                # This allows to parse values like '3' but also '3/10'
+                m = re.search(r'^\d+', track.number)
+                return int(m.group(0))
+            except AttributeError:
+                return 0
+
+    ndiscs = len(tracklists)
+    for discnumber in sorted(tracklists):
+        tracklist = tracklists[discnumber]
+        if ndiscs > 1:
+            info.append("<b>%s</b>" % (_('Disc %d') % discnumber))
+        lines = ["%s %s - %s (%s)" % item for item in sorted(tracklist, key=sorttracknum)]
+        info.append("<b>%s</b><br />%s<br />" % (_('Tracklist:'),
+                    '<br />'.join([htmlescape(s).replace(' ', '&nbsp;') for s in lines])))
+    return '<br/>'.join(info)
+
+
 class FileInfoDialog(InfoDialog):
 
     def __init__(self, file_, parent=None):
@@ -311,7 +367,7 @@ class AlbumInfoDialog(InfoDialog):
             self.ui.info.setText(text + '<hr />')
         else:
             tabWidget.setTabText(tab_index, _("&Info"))
-            self.tab_hide(tab)
+            self.ui.info.setText(format_tracklist(album))
 
 
 class TrackInfoDialog(InfoDialog):
@@ -346,36 +402,7 @@ class ClusterInfoDialog(InfoDialog):
 
     def _display_info_tab(self):
         tab = self.ui.info_tab
-        cluster = self.obj
         tabWidget = self.ui.tabWidget
         tab_index = tabWidget.indexOf(tab)
         tabWidget.setTabText(tab_index, _("&Info"))
-        info = []
-        info.append("<b>%s</b> %s" % (_('Album:'),
-                                      htmlescape(cluster.metadata["album"])))
-        info.append("<b>%s</b> %s" % (_('Artist:'),
-                                      htmlescape(cluster.metadata["albumartist"])))
-        info.append("")
-        TrackListItem = namedtuple('TrackListItem', 'tracknumber, title, artist, length')
-        tracklist = []
-        for file_ in cluster.iterfiles(False):
-            m = file_.metadata
-            artist = m["artist"] or m["albumartist"] or cluster.metadata["albumartist"]
-            tracklist.append(TrackListItem(m["tracknumber"], m["title"], artist,
-                                           m["~length"]))
-
-        def sorttracknum(item):
-            try:
-                return int(item.tracknumber)
-            except ValueError:
-                try:
-                    # This allows to parse values like '3' but also '3/10'
-                    m = re.search(r'^\d+', item.tracknumber)
-                    return int(m.group(0))
-                except AttributeError:
-                    return 0
-
-        lines = ["%s %s - %s (%s)" % item for item in sorted(tracklist, key=sorttracknum)]
-        info.append("<b>%s</b><br />%s" % (_('Tracklist:'),
-                    '<br />'.join([htmlescape(s).replace(' ', '&nbsp;') for s in lines])))
-        self.ui.info.setText('<br/>'.join(info))
+        self.ui.info.setText(format_tracklist(self.obj))

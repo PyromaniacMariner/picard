@@ -1,10 +1,19 @@
 # -*- coding: utf-8 -*-
 #
 # Picard, the next-generation MusicBrainz tagger
+#
 # Copyright (C) 2007 Lukáš Lalinský
 # Copyright (C) 2009 Carlin Mangar
+# Copyright (C) 2009, 2018-2020 Philipp Wolfer
+# Copyright (C) 2011-2013 Michael Wiencek
+# Copyright (C) 2013, 2015, 2018-2019 Laurent Monin
+# Copyright (C) 2013, 2017 Sophist-UK
 # Copyright (C) 2014 Shadab Zafar
-# Copyright (C) 2015 Laurent Monin
+# Copyright (C) 2015, 2017 Wieland Hoffmann
+# Copyright (C) 2016-2018 Sambhav Kothari
+# Copyright (C) 2017 Suhas
+# Copyright (C) 2018 Vishal Choudhary
+# Copyright (C) 2018 yagyanshbhatia
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -19,6 +28,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
+
 
 from functools import partial
 from operator import attrgetter
@@ -39,7 +49,6 @@ from picard.const import (
     PLUGINS_API,
     USER_PLUGIN_DIR,
 )
-from picard.const.sys import IS_WIN
 from picard.util import reconnect
 
 from picard.ui import HashableTreeWidgetItem
@@ -131,7 +140,7 @@ class PluginTreeWidgetItem(HashableTreeWidgetItem):
             button.hide()
         else:
             button.show()
-            button.setToolTip(_("Download and upgrade plugin to version %s") % self.new_version)
+            button.setToolTip(_("Download and upgrade plugin to version %s") % self.new_version.to_string(short=True))
             self.set_icon(button, 'SP_BrowserReload')
 
     def show_enable(self, button, mode):
@@ -208,6 +217,7 @@ class PluginsOptionsPage(OptionsPage):
     PARENT = None
     SORT_ORDER = 70
     ACTIVE = True
+    HELP_URL = '/config/options_plugins.html'
 
     options = [
         config.ListOption("setting", "enabled_plugins", []),
@@ -320,7 +330,7 @@ class PluginsOptionsPage(OptionsPage):
             new_version = None
             if plugin.module_name in available_plugins:
                 latest = available_plugins[plugin.module_name]
-                if latest.split('.') > plugin.version.split('.'):
+                if latest > plugin.version:
                     new_version = latest
             self.update_plugin_item(None, plugin,
                                     enabled=self.is_plugin_enabled(plugin),
@@ -373,6 +383,8 @@ class PluginsOptionsPage(OptionsPage):
                     self.set_current_item(item, scroll=True)
 
     def _reload(self):
+        if self.deleted:
+            return
         self._remove_all()
         self._populate()
         self._restore_plugins_states()
@@ -422,7 +434,7 @@ class PluginsOptionsPage(OptionsPage):
                 self,
                 _("Plugin '%s'") % plugin_name,
                 _("The plugin '%s' will be upgraded to version %s on next run of Picard.")
-                % (plugin.name, item.new_version)
+                % (plugin.name, item.new_version.to_string(short=True))
             )
 
             item.upgrade_to_version = item.new_version
@@ -471,9 +483,10 @@ class PluginsOptionsPage(OptionsPage):
 
         def update_text():
             if item.new_version is not None:
-                version = "%s → %s" % (plugin.version, item.new_version)
+                version = "%s → %s" % (plugin.version.to_string(short=True),
+                                       item.new_version.to_string(short=True))
             else:
-                version = plugin.version
+                version = plugin.version.to_string(short=True)
 
             if item.installed_font is None:
                 item.installed_font = item.font(COLUMN_NAME)
@@ -527,7 +540,8 @@ class PluginsOptionsPage(OptionsPage):
 
         if item.is_installed:
             item.buttons['install'].mode('hide')
-            item.buttons['uninstall'].mode('show')
+            item.buttons['uninstall'].mode(
+                'show' if plugin.is_user_installed else 'hide')
             item.enable(enabled, greyout=False)
 
             def uninstall_processor():
@@ -559,7 +573,7 @@ class PluginsOptionsPage(OptionsPage):
                 return int(elem)
             except ValueError:
                 return 0
-        item.setSortData(COLUMN_VERSION, tuple(v2int(e) for e in plugin.version.split('.')))
+        item.setSortData(COLUMN_VERSION, plugin.version)
 
         return item
 
@@ -575,17 +589,20 @@ class PluginsOptionsPage(OptionsPage):
                 label = _("Restart Picard to upgrade to new version")
             else:
                 label = _("New version available")
-            text.append("<b>" + label + ": " + item.new_version + "</b>")
+            version_str = item.new_version.to_string(short=True)
+            text.append("<b>{0}: {1}</b>".format(label, version_str))
         if plugin.description:
             text.append(plugin.description + "<hr width='90%'/>")
-        if plugin.name:
-            text.append("<b>" + _("Name") + "</b>: " + plugin.name)
-        if plugin.author:
-            text.append("<b>" + _("Authors") + "</b>: " + plugin.author)
-        if plugin.license:
-            text.append("<b>" + _("License") + "</b>: " + plugin.license)
-        text.append("<b>" + _("Files") + "</b>: " + plugin.files_list)
-        self.ui.details.setText("<p>%s</p>" % "<br/>\n".join(text))
+        infos = [
+            (_("Name"), plugin.name),
+            (_("Authors"), plugin.author),
+            (_("License"), plugin.license),
+            (_("Files"), plugin.files_list),
+        ]
+        for label, value in infos:
+            if value:
+                text.append("<b>{0}:</b> {1}".format(label, value))
+        self.ui.details.setText("<p>{0}</p>".format("<br/>\n".join(text)))
 
     def change_details(self):
         item = self.selected_item()
@@ -637,11 +654,7 @@ class PluginsOptionsPage(OptionsPage):
 
     @staticmethod
     def open_plugin_dir():
-        if IS_WIN:
-            url = 'file:///' + USER_PLUGIN_DIR
-        else:
-            url = 'file://' + USER_PLUGIN_DIR
-        QtGui.QDesktopServices.openUrl(QtCore.QUrl(url, QtCore.QUrl.TolerantMode))
+        QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(USER_PLUGIN_DIR))
 
     def mimeTypes(self):
         return ["text/uri-list"]

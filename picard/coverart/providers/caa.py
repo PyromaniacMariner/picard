@@ -1,12 +1,18 @@
 # -*- coding: utf-8 -*-
 #
 # Picard, the next-generation MusicBrainz tagger
+#
 # Copyright (C) 2007 Oliver Charles
-# Copyright (C) 2007-2011 Philipp Wolfer
-# Copyright (C) 2007, 2010, 2011 Lukáš Lalinský
+# Copyright (C) 2007, 2010-2011 Lukáš Lalinský
+# Copyright (C) 2007-2011, 2015, 2018-2019 Philipp Wolfer
 # Copyright (C) 2011 Michael Wiencek
 # Copyright (C) 2011-2012 Wieland Hoffmann
-# Copyright (C) 2013-2014 Laurent Monin
+# Copyright (C) 2013-2015, 2018-2019 Laurent Monin
+# Copyright (C) 2015-2016 Rahul Raturi
+# Copyright (C) 2016-2017 Sambhav Kothari
+# Copyright (C) 2017 Frederik “Freso” S. Olesen
+# Copyright (C) 2018 Bob Swift
+# Copyright (C) 2018 Vishal Choudhary
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -22,6 +28,7 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 
+
 from collections import (
     OrderedDict,
     namedtuple,
@@ -30,6 +37,7 @@ from functools import partial
 
 from PyQt5 import (
     QtCore,
+    QtGui,
     QtWidgets,
 )
 from PyQt5.QtNetwork import (
@@ -49,7 +57,7 @@ from picard.coverart.image import (
     CaaCoverArtImage,
     CaaThumbnailCoverArtImage,
 )
-from picard.coverart.providers import (
+from picard.coverart.providers.provider import (
     CoverArtProvider,
     ProviderOptions,
 )
@@ -67,12 +75,15 @@ from picard.ui.util import StandardButton
 CaaSizeItem = namedtuple('CaaSizeItem', ['thumbnail', 'label'])
 
 _CAA_THUMBNAIL_SIZE_MAP = OrderedDict([
-    (250, CaaSizeItem('small', N_('250 px'))),
-    (500, CaaSizeItem('large', N_('500 px'))),
+    (250, CaaSizeItem('250', N_('250 px'))),
+    (500, CaaSizeItem('500', N_('500 px'))),
     (1200, CaaSizeItem('1200', N_('1200 px'))),
     (-1, CaaSizeItem(None, N_('Full size'))),
 ])
-
+_CAA_THUMBNAIL_SIZE_ALIASES = {
+    '500': 'large',
+    '250': 'small',
+}
 _CAA_IMAGE_SIZE_DEFAULT = 500
 
 _CAA_IMAGE_TYPE_DEFAULT_INCLUDE = ['front']
@@ -95,8 +106,13 @@ def caa_url_fallback_list(desired_size, thumbnails):
     for item_id, item in reversed_map.items():
         if item_id == -1 or item_id > desired_size:
             continue
-        if item.thumbnail in thumbnails:
-            urls.append(thumbnails[item.thumbnail])
+        url = thumbnails.get(item.thumbnail, None)
+        if url is None:
+            size_alias = _CAA_THUMBNAIL_SIZE_ALIASES.get(item.thumbnail, None)
+            if size_alias is not None:
+                url = thumbnails.get(size_alias, None)
+        if url is not None:
+            urls.append(url)
     return urls
 
 
@@ -109,14 +125,11 @@ class ArrowButton(QtWidgets.QPushButton):
         parent {[type]} -- Parent of the QPushButton object being created (default: {None})
     """
 
-    ARROW_BUTTON_WIDTH = 35
-    ARROW_BUTTON_HEIGHT = 20
-
-    def __init__(self, label, command=None, parent=None):
-        super().__init__(label, parent=parent)
+    def __init__(self, icon_name, command=None, parent=None):
+        icon = QtGui.QIcon(":/images/16x16/" + icon_name + '.png')
+        super().__init__(icon, "", parent=parent)
         if command is not None:
             self.clicked.connect(command)
-        self.setFixedSize(QtCore.QSize(self.ARROW_BUTTON_WIDTH, self.ARROW_BUTTON_HEIGHT))
 
 
 class ArrowsColumn(QtWidgets.QWidget):
@@ -138,13 +151,13 @@ class ArrowsColumn(QtWidgets.QWidget):
         spacer_item = QtWidgets.QSpacerItem(20, 20, QtWidgets.QSizePolicy.Minimum, QtWidgets.QSizePolicy.Expanding)
         arrows_layout = QtWidgets.QVBoxLayout()
         arrows_layout.addItem(QtWidgets.QSpacerItem(spacer_item))
-        self.button_add = ArrowButton('>' if reverse else '<', self.move_from_ignore)
+        self.button_add = ArrowButton('go-next' if reverse else 'go-previous', self.move_from_ignore)
         arrows_layout.addWidget(self.button_add)
-        self.button_add_all = ArrowButton('>>' if reverse else '<<', self.move_all_from_ignore)
+        self.button_add_all = ArrowButton('move-all-right' if reverse else 'move-all-left', self.move_all_from_ignore)
         arrows_layout.addWidget(self.button_add_all)
-        self.button_remove = ArrowButton('<' if reverse else '>', self.move_to_ignore)
+        self.button_remove = ArrowButton('go-previous' if reverse else 'go-next', self.move_to_ignore)
         arrows_layout.addWidget(self.button_remove)
-        self.button_remove_all = ArrowButton('<<' if reverse else '>>', self.move_all_to_ignore)
+        self.button_remove_all = ArrowButton('move-all-left' if reverse else 'move-all-right', self.move_all_to_ignore)
         arrows_layout.addWidget(self.button_remove_all)
         arrows_layout.addItem(QtWidgets.QSpacerItem(spacer_item))
         self.setLayout(arrows_layout)
@@ -169,13 +182,13 @@ class ListBox(QtWidgets.QListWidget):
         parent {[type]} -- Parent of the QListWidget object being created (default: {None})
     """
 
-    LISTBOX_WIDTH = 150
+    LISTBOX_WIDTH = 100
     LISTBOX_HEIGHT = 250
 
     def __init__(self, parent=None):
         super().__init__(parent=parent)
-        self.setFixedSize(QtCore.QSize(self.LISTBOX_WIDTH, self.LISTBOX_HEIGHT))
-        self.setSizePolicy(QtWidgets.QSizePolicy.Minimum, QtWidgets.QSizePolicy.Expanding)
+        self.setMinimumSize(QtCore.QSize(self.LISTBOX_WIDTH, self.LISTBOX_HEIGHT))
+        self.setSizePolicy(QtWidgets.QSizePolicy.MinimumExpanding, QtWidgets.QSizePolicy.Expanding)
         self.setSortingEnabled(True)
         self.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
 
@@ -244,10 +257,6 @@ class CAATypesSelectorDialog(PicardDialog):
         instructions.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
         self.layout.addWidget(instructions)
 
-        grid = QtWidgets.QWidget()
-        gridlayout = QtWidgets.QGridLayout()
-        grid.setLayout(gridlayout)
-
         self.arrows_include = ArrowsColumn(
             self.list_include,
             self.list_ignore,
@@ -261,20 +270,28 @@ class CAATypesSelectorDialog(PicardDialog):
             reverse=True
         )
 
-        def add_widget(row=0, column=0, widget=None):
-            gridlayout.addWidget(widget, row, column)
+        lists_layout = QtWidgets.QHBoxLayout()
 
-        add_widget(row=0, column=0, widget=QtWidgets.QLabel(_("Include types list")))
-        add_widget(row=1, column=0, widget=self.list_include)
+        include_list_layout = QtWidgets.QVBoxLayout()
+        include_list_layout.addWidget(QtWidgets.QLabel(_("Include types list")))
+        include_list_layout.addWidget(self.list_include)
+        lists_layout.addLayout(include_list_layout)
 
-        add_widget(row=1, column=1, widget=self.arrows_include)
-        add_widget(row=1, column=2, widget=self.list_ignore)
-        add_widget(row=1, column=3, widget=self.arrows_exclude)
+        lists_layout.addWidget(self.arrows_include)
 
-        add_widget(row=0, column=4, widget=QtWidgets.QLabel(_("Exclude types list")))
-        add_widget(row=1, column=4, widget=self.list_exclude)
+        ignore_list_layout = QtWidgets.QVBoxLayout()
+        ignore_list_layout.addWidget(QtWidgets.QLabel(""))
+        ignore_list_layout.addWidget(self.list_ignore)
+        lists_layout.addLayout(ignore_list_layout)
 
-        self.layout.addWidget(grid)
+        lists_layout.addWidget(self.arrows_exclude)
+
+        exclude_list_layout = QtWidgets.QVBoxLayout()
+        exclude_list_layout.addWidget(QtWidgets.QLabel(_("Exclude types list")))
+        exclude_list_layout.addWidget(self.list_exclude)
+        lists_layout.addLayout(exclude_list_layout)
+
+        self.layout.addLayout(lists_layout)
 
         # Add usage explanation to the dialog box
         instructions = QtWidgets.QLabel()
@@ -306,8 +323,6 @@ class CAATypesSelectorDialog(PicardDialog):
         ]
         for label, callback in extrabuttons:
             button = QtWidgets.QPushButton(_(label))
-            button.setSizePolicy(
-                QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Expanding)
             self.buttonbox.addButton(button, QtWidgets.QDialogButtonBox.ActionRole)
             button.clicked.connect(callback)
 
@@ -350,7 +365,7 @@ class CAATypesSelectorDialog(PicardDialog):
         self.list_ignore.clear()
         for caa_type in CAA_TYPES:
             name = caa_type['name']
-            title = translate_caa_type(caa_type['title'])
+            title = translate_caa_type(name)
             item = QtWidgets.QListWidgetItem(title)
             item.setData(QtCore.Qt.UserRole, name)
             if name in includes:
@@ -414,6 +429,8 @@ class ProviderOptionsCaa(ProviderOptions):
     """
         Options for Cover Art Archive cover art provider
     """
+
+    HELP_URL = '/config/options_cover_art_archive.html'
 
     options = [
         config.BoolOption("setting", "caa_save_single_front_image", False),
@@ -595,7 +612,7 @@ class CoverArtProviderCaa(CoverArtProvider):
                                   image["image"])
                         continue
                     # if image has no type set, we still want it to match
-                    # pseudo type 'unknown'
+                    # pseudo type 'unknown'
                     if not image["types"]:
                         image["types"] = ["unknown"]
                     else:
@@ -631,7 +648,7 @@ class CoverArtProviderCaa(CoverArtProvider):
                             # thumbnail will be used to "display" PDF in info
                             # dialog
                             thumbnail = self.coverartimage_thumbnail_class(
-                                url=url[0],
+                                url=urls[0],
                                 types=image["types"],
                                 is_front=image['front'],
                                 comment=image["comment"],

@@ -1,12 +1,48 @@
 # -*- coding: utf-8 -*-
-from test.picardtestcase import PicardTestCase
+#
+# Picard, the next-generation MusicBrainz tagger
+#
+# Copyright (C) 2017 Sophist-UK
+# Copyright (C) 2018 Wieland Hoffmann
+# Copyright (C) 2018-2020 Laurent Monin
+# Copyright (C) 2018-2020 Philipp Wolfer
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 2
+# of the License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
+
+
+from test.picardtestcase import (
+    PicardTestCase,
+    load_test_json,
+)
 from test.test_coverart_image import create_image
 
 from picard import config
+from picard.cluster import Cluster
+from picard.file import File
+from picard.mbjson import (
+    release_to_metadata,
+    track_to_metadata,
+)
 from picard.metadata import (
     MULTI_VALUED_JOINER,
     Metadata,
+    weights_from_preferred_countries,
+    weights_from_preferred_formats,
+    weights_from_release_type_scores,
 )
+from picard.track import Track
 from picard.util.imagelist import ImageList
 from picard.util.tags import PRESERVED_TAGS
 
@@ -14,6 +50,15 @@ from picard.util.tags import PRESERVED_TAGS
 settings = {
     'write_id3v23': False,
     'id3v23_join_with': '/',
+    'preferred_release_countries': [],
+    'preferred_release_formats': [],
+    'standardize_artists': False,
+    'standardize_instruments': False,
+    'translate_artist_names': False,
+    'release_ars': True,
+    'release_type_scores': [
+        ('Album', 1.0)
+    ],
 }
 
 
@@ -87,7 +132,18 @@ class MetadataTest(PicardTestCase):
         metadata_items = [(x, z) for (x, y) in self.metadata.rawitems() for z in y]
         self.assertEqual(metadata_items, list(self.metadata.items()))
 
+    def test_metadata_unset(self):
+        self.metadata.unset("single1")
+        self.assertNotIn("single1", self.metadata)
+        self.assertNotIn("single1", self.metadata.deleted_tags)
+        self.metadata.unset('unknown_tag')
+
     def test_metadata_delete(self):
+        del self.metadata["single1"]
+        self.assertNotIn("single1", self.metadata)
+        self.assertIn("single1", self.metadata.deleted_tags)
+
+    def test_metadata_legacy_delete(self):
         self.metadata.delete("single1")
         self.assertNotIn("single1", self.metadata)
         self.assertIn("single1", self.metadata.deleted_tags)
@@ -109,6 +165,22 @@ class MetadataTest(PicardTestCase):
         self.metadata["single1"] = "value1"
         self.assertIn("single1", self.metadata)
         self.assertNotIn("single1", self.metadata.deleted_tags)
+
+    def test_normalize_tag(self):
+        self.assertEqual('sometag', Metadata.normalize_tag('sometag'))
+        self.assertEqual('sometag', Metadata.normalize_tag('sometag:'))
+        self.assertEqual('sometag', Metadata.normalize_tag('sometag::'))
+        self.assertEqual('sometag:desc', Metadata.normalize_tag('sometag:desc'))
+
+    def test_metadata_tag_trailing_colon(self):
+        self.metadata['tag:'] = 'Foo'
+        self.assertIn('tag', self.metadata)
+        self.assertIn('tag:', self.metadata)
+        self.assertEqual('Foo', self.metadata['tag'])
+        self.assertEqual('Foo', self.metadata['tag:'])
+        del self.metadata['tag']
+        self.assertNotIn('tag', self.metadata)
+        self.assertNotIn('tag:', self.metadata)
 
     def test_metadata_copy(self):
         m = Metadata()
@@ -154,7 +226,8 @@ class MetadataTest(PicardTestCase):
         self.assertNotIn("single1", self.metadata.deleted_tags)
 
     def test_metadata_applyfunc(self):
-        def func(x): return x[1:]
+        def func(x):
+            return x[1:]
         self.metadata.apply_func(func)
 
         self.assertEqual("ingle1-value", self.metadata["single1"])
@@ -171,14 +244,16 @@ class MetadataTest(PicardTestCase):
         m[PRESERVED_TAGS[0]] = 'value1'
         m['not_preserved'] = 'value2'
 
-        def func(x): return x[1:]
+        def func(x):
+            return x[1:]
         m.apply_func(func)
 
         self.assertEqual("value1", m[PRESERVED_TAGS[0]])
         self.assertEqual("alue2", m['not_preserved'])
 
     def test_metadata_applyfunc_delete_tags(self):
-        def func(x): return None
+        def func(x):
+            return None
         metadata = Metadata(self.metadata)
         metadata.apply_func(func)
         self.assertEqual(0, len(metadata.rawitems()))
@@ -208,6 +283,18 @@ class MetadataTest(PicardTestCase):
         self.assertEqual(m1.compare(m2), m2.compare(m1))
         self.assertEqual(m1.compare(m2), 1)
 
+    def test_compare_with_ignored(self):
+        m1 = Metadata()
+        m1["title"] = "title1"
+        m1["tracknumber"] = "2"
+        m1.length = 360
+        m2 = Metadata()
+        m2["title"] = "title1"
+        m2["tracknumber"] = "3"
+        m2.length = 300
+        self.assertNotEqual(m1.compare(m2), 1)
+        self.assertEqual(m1.compare(m2, ignored=['tracknumber', '~length']), 1)
+
     def test_compare_lengths(self):
         m1 = Metadata()
         m1.length = 360
@@ -220,7 +307,20 @@ class MetadataTest(PicardTestCase):
         m1["tracknumber"] = "1"
         m2 = Metadata()
         m2["tracknumber"] = "2"
+        m3 = Metadata()
+        m3["tracknumber"] = "2"
         self.assertEqual(m1.compare(m2), 0)
+        self.assertEqual(m2.compare(m3), 1)
+
+    def test_compare_discnumber_difference(self):
+        m1 = Metadata()
+        m1["discnumber"] = "1"
+        m2 = Metadata()
+        m2["discnumber"] = "2"
+        m3 = Metadata()
+        m3["discnumber"] = "2"
+        self.assertEqual(m1.compare(m2), 0)
+        self.assertEqual(m2.compare(m3), 1)
 
     def test_compare_deleted(self):
         m1 = Metadata()
@@ -274,25 +374,22 @@ class MetadataTest(PicardTestCase):
         self.assertRaises(KeyError, m.getraw, 'a')
         self.assertIn('a', m.deleted_tags)
 
-        # NOTE: historic behavior of Metadata.delete()
-        # an attempt to delete an non-existing tag, will add it to the list
-        # of deleted tags
-        # so this will not raise a KeyError
-        # as is it differs from dict or even defaultdict behavior
+        # NOTE: historic behavior of Metadata.delete()
+        # an attempt to delete an non-existing tag, will add it to the list
+        # of deleted tags
+        # so this will not raise a KeyError
+        # as is it differs from dict or even defaultdict behavior
         del m['unknown']
         self.assertIn('unknown', m.deleted_tags)
 
     def test_metadata_mapping_iter(self):
-        l = set(self.metadata_d1)
-        self.assertEqual(l, {'a', 'c', 'd'})
+        self.assertEqual(set(self.metadata_d1), {'a', 'c', 'd'})
 
     def test_metadata_mapping_keys(self):
-        l = set(self.metadata_d1.keys())
-        self.assertEqual(l, {'a', 'c', 'd'})
+        self.assertEqual(set(self.metadata_d1.keys()), {'a', 'c', 'd'})
 
     def test_metadata_mapping_values(self):
-        l = set(self.metadata_d1.values())
-        self.assertEqual(l, {'b', '2', 'x; y'})
+        self.assertEqual(set(self.metadata_d1.values()), {'b', '2', 'x; y'})
 
     def test_metadata_mapping_len(self):
         m = self.metadata_d1
@@ -328,7 +425,7 @@ class MetadataTest(PicardTestCase):
         self._check_mapping_update(m)
 
     def test_metadata_mapping_update_tuple(self):
-        # update from tuple
+        # update from tuple
         m = self.metadata_d2
 
         d2 = (('c', 3), ('d', ['u', 'w']), ('x', ''))
@@ -337,27 +434,27 @@ class MetadataTest(PicardTestCase):
         self._check_mapping_update(m)
 
     def test_metadata_mapping_update_dictlike(self):
-        # update from kwargs
+        # update from kwargs
         m = self.metadata_d2
 
         m.update(c=3, d=['u', 'w'], x='')
         self._check_mapping_update(m)
 
     def test_metadata_mapping_update_noparam(self):
-        # update without parameter
+        # update without parameter
         m = self.metadata_d2
 
         self.assertRaises(TypeError, m.update)
         self.assertEqual(m['a'], 'b')
 
     def test_metadata_mapping_update_intparam(self):
-        # update without parameter
+        # update without parameter
         m = self.metadata_d2
 
         self.assertRaises(TypeError, m.update, 123)
 
     def test_metadata_mapping_update_strparam(self):
-        # update without parameter
+        # update without parameter
         m = self.metadata_d2
 
         self.assertRaises(ValueError, m.update, 'abc')
@@ -389,7 +486,7 @@ class MetadataTest(PicardTestCase):
 
         m1 = Metadata(a='b', length=1234, images=[image1])
         self.assertEqual(m1.images[0], image1)
-        self.assertEqual(len(m1), 2) # one tag, one image
+        self.assertEqual(len(m1), 2)  # one tag, one image
 
         m1.images.append(image2)
         self.assertEqual(m1.images[1], image2)
@@ -402,7 +499,7 @@ class MetadataTest(PicardTestCase):
         self.assertEqual(m1.images[0], image1)
 
         m1.images.pop(0)
-        self.assertEqual(len(m1), 1) # one tag, zero image
+        self.assertEqual(len(m1), 1)  # one tag, zero image
         self.assertFalse(m1.images)
 
     def test_metadata_mapping_iterable(self):
@@ -414,3 +511,77 @@ class MetadataTest(PicardTestCase):
         self.assertIn('c', m.getraw('tag_set'))
         self.assertIn('e', m.getraw('tag_dict'))
         self.assertIn('gh', m.getraw('tag_str'))
+
+    def test_compare_to_release(self):
+        release = load_test_json('release.json')
+        metadata = Metadata()
+        release_to_metadata(release, metadata)
+        match = metadata.compare_to_release(release, Cluster.comparison_weights)
+        self.assertEqual(1.0, match.similarity)
+        self.assertEqual(release, match.release)
+
+    def test_compare_to_release_with_score(self):
+        release = load_test_json('release.json')
+        metadata = Metadata()
+        release_to_metadata(release, metadata)
+        for score, sim in ((42, 0.42), ('42', 0.42), ('foo', 1.0), (None, 1.0)):
+            release['score'] = score
+            match = metadata.compare_to_release(release, Cluster.comparison_weights)
+            self.assertEqual(sim, match.similarity)
+
+    def test_weights_from_release_type_scores(self):
+        release = load_test_json('release.json')
+        parts = []
+        weights_from_release_type_scores(parts, release, {'Album': 0.75}, 666)
+        self.assertEqual(
+            parts[0],
+            (0.75, 666)
+        )
+        weights_from_release_type_scores(parts, release, {}, 666)
+        self.assertEqual(
+            parts[1],
+            (0.5, 666)
+        )
+        del release['release-group']
+        weights_from_release_type_scores(parts, release, {}, 777)
+        self.assertEqual(
+            parts[2],
+            (0.0, 777)
+        )
+
+    def test_preferred_countries(self):
+        release = load_test_json('release.json')
+        parts = []
+        weights_from_preferred_countries(parts, release, [], 666)
+        self.assertFalse(parts)
+        weights_from_preferred_countries(parts, release, ['FR'], 666)
+        self.assertEqual(parts[0], (0.0, 666))
+        weights_from_preferred_countries(parts, release, ['GB'], 666)
+        self.assertEqual(parts[1], (1.0, 666))
+
+    def test_preferred_formats(self):
+        release = load_test_json('release.json')
+        parts = []
+        weights_from_preferred_formats(parts, release, [], 777)
+        self.assertFalse(parts)
+        weights_from_preferred_formats(parts, release, ['Digital Media'], 777)
+        self.assertEqual(parts[0], (0.0, 777))
+        weights_from_preferred_formats(parts, release, ['12" Vinyl'], 777)
+        self.assertEqual(parts[1], (1.0, 777))
+
+    def test_compare_to_track(self):
+        track_json = load_test_json('track.json')
+        track = Track(track_json['id'])
+        track_to_metadata(track_json, track)
+        match = track.metadata.compare_to_track(track_json, File.comparison_weights)
+        self.assertEqual(1.0, match.similarity)
+        self.assertEqual(track_json, match.track)
+
+    def test_compare_to_track_with_score(self):
+        track_json = load_test_json('track.json')
+        track = Track(track_json['id'])
+        track_to_metadata(track_json, track)
+        for score, sim in ((42, 0.42), ('42', 0.42), ('foo', 1.0), (None, 1.0)):
+            track_json['score'] = score
+            match = track.metadata.compare_to_track(track_json, File.comparison_weights)
+            self.assertEqual(sim, match.similarity)

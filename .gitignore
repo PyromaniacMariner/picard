@@ -2,6 +2,7 @@
 .pydevproject
 .project
 .idea/
+.vscode/
 
 # OS generated files
 .DS_Store
@@ -22,13 +23,14 @@ build/
 coverage.xml
 dist/
 installer/picard-setup.nsi
+installer/i18n/out/*.nsh
 locale/
 org.musicbrainz.Picard.appdata.xml
 picard.egg-info
 po/attributes/attributes.pot
 po/countries/countries.pot
 scripts/picard
-tagger.py
+/tagger.py
 win-version-info.txt
 
 # Other files

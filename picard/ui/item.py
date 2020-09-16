@@ -1,7 +1,13 @@
 # -*- coding: utf-8 -*-
 #
 # Picard, the next-generation MusicBrainz tagger
-# Copyright (C) 2006 Lukáš Lalinský
+#
+# Copyright (C) 2006-2007 Lukáš Lalinský
+# Copyright (C) 2010, 2018 Philipp Wolfer
+# Copyright (C) 2011-2012 Michael Wiencek
+# Copyright (C) 2012 Chad Wilson
+# Copyright (C) 2013 Laurent Monin
+# Copyright (C) 2014 Sophist-UK
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -60,3 +66,19 @@ class Item(object):
 
     def load(self, priority=False, refresh=False):
         pass
+
+    @property
+    def tracknumber(self):
+        """The track number as an int."""
+        try:
+            return int(self.metadata["tracknumber"])
+        except BaseException:
+            return 0
+
+    @property
+    def discnumber(self):
+        """The disc number as an int."""
+        try:
+            return int(self.metadata["discnumber"])
+        except BaseException:
+            return 0

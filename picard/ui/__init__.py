@@ -1,7 +1,13 @@
 # -*- coding: utf-8 -*-
 #
 # Picard, the next-generation MusicBrainz tagger
-# Copyright (C) 2007 Lukáš Lalinský
+#
+# Copyright (C) 2006-2008 Lukáš Lalinský
+# Copyright (C) 2014 Sophist-UK
+# Copyright (C) 2014, 2018 Laurent Monin
+# Copyright (C) 2016-2018 Sambhav Kothari
+# Copyright (C) 2018 Vishal Choudhary
+# Copyright (C) 2019-2020 Philipp Wolfer
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -22,12 +28,24 @@ import uuid
 
 from PyQt5 import (
     QtCore,
+    QtGui,
     QtWidgets,
 )
 
 from picard import config
-from picard.const.sys import IS_MACOS
+from picard.const.sys import (
+    IS_MACOS,
+    IS_WIN,
+)
 from picard.util import restore_method
+
+
+if IS_MACOS:
+    FONT_FAMILY_MONOSPACE = 'Menlo'
+elif IS_WIN:
+    FONT_FAMILY_MONOSPACE = 'Consolas'
+else:
+    FONT_FAMILY_MONOSPACE = 'Monospace'
 
 
 class PreserveGeometry:
@@ -57,6 +75,29 @@ class PreserveGeometry:
         config.persist[self.opt_name()] = self.saveGeometry()
 
 
+class SingletonDialog:
+    _instance = None
+
+    @classmethod
+    def get_instance(cls, *args, **kwargs):
+        if not cls._instance:
+            cls._instance = cls(*args, **kwargs)
+            cls._instance.finished.connect(cls._on_dialog_finished)
+        return cls._instance
+
+    @classmethod
+    def show_instance(cls, *args, **kwargs):
+        instance = cls.get_instance(*args, **kwargs)
+        instance.show()
+        instance.raise_()
+        instance.activateWindow()
+        return instance
+
+    @classmethod
+    def _on_dialog_finished(cls):
+        cls._instance = None
+
+
 class PicardDialog(QtWidgets.QDialog, PreserveGeometry):
 
     flags = QtCore.Qt.WindowSystemMenuHint | QtCore.Qt.WindowTitleHint | QtCore.Qt.WindowCloseButtonHint
@@ -65,8 +106,7 @@ class PicardDialog(QtWidgets.QDialog, PreserveGeometry):
         super().__init__(parent, self.flags)
 
     def keyPressEvent(self, event):
-        if (IS_MACOS and event.modifiers() & QtCore.Qt.ControlModifier
-            and event.key() == QtCore.Qt.Key_W):
+        if event.matches(QtGui.QKeySequence.Close):
             self.close()
         else:
             super().keyPressEvent(event)

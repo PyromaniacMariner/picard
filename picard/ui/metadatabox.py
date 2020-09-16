@@ -1,8 +1,19 @@
 # -*- coding: utf-8 -*-
 #
 # Picard, the next-generation MusicBrainz tagger
+#
 # Copyright (C) 2004 Robert Kaye
-# Copyright (C) 2006 Lukáš Lalinský
+# Copyright (C) 2006-2007, 2012 Lukáš Lalinský
+# Copyright (C) 2011-2014 Michael Wiencek
+# Copyright (C) 2012 Nikolai Prokoschenko
+# Copyright (C) 2013-2014 Sophist-UK
+# Copyright (C) 2013-2014, 2017-2019 Laurent Monin
+# Copyright (C) 2015 Ohm Patel
+# Copyright (C) 2015 Wieland Hoffmann
+# Copyright (C) 2015, 2018-2020 Philipp Wolfer
+# Copyright (C) 2016-2018 Sambhav Kothari
+# Copyright (C) 2018 Vishal Choudhary
+# Copyright (C) 2020 Gabriel Ferreira
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -17,6 +28,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
+
 
 from collections import defaultdict
 from functools import partial
@@ -41,20 +53,14 @@ from picard.util import (
     thread,
     throttle,
 )
+from picard.util.preservedtags import PreservedTags
 from picard.util.tags import display_tag_name
 
 from picard.ui.colors import interface_colors
-from picard.ui.edittagdialog import EditTagDialog
-
-
-COMMON_TAGS = [
-    "title",
-    "artist",
-    "album",
-    "tracknumber",
-    "~length",
-    "date",
-]
+from picard.ui.edittagdialog import (
+    EditTagDialog,
+    TagEditorDelegate,
+)
 
 
 class TagStatus:
@@ -138,7 +144,7 @@ class TagDiff(object):
             removable = True
         elif orig_values and new_values and self.__tag_ne(tag, orig_values, new_values):
             self.status[tag] |= TagStatus.CHANGED
-        elif not (orig_values or new_values or tag in COMMON_TAGS):
+        elif not (orig_values or new_values or tag in config.setting['metadatabox_top_tags']):
             self.status[tag] |= TagStatus.EMPTY
         else:
             self.status[tag] |= TagStatus.NOCHANGE
@@ -155,30 +161,28 @@ class TagDiff(object):
         return TagStatus.NOCHANGE
 
 
-class PreservedTags:
+class TableTagEditorDelegate(TagEditorDelegate):
 
-    opt_name = 'preserved_tags'
+    def createEditor(self, parent, option, index):
+        editor = super().createEditor(parent, option, index)
+        if editor and isinstance(editor, QtWidgets.QPlainTextEdit):
+            table = self.parent()
+            # Set the editor to the row height, but at least 80 pixel
+            # to allow for proper multiline editing.
+            height = max(80, table.rowHeight(index.row()) - 1)
+            editor.setMinimumSize(QtCore.QSize(0, height))
+            # Resize the row so the editor fits in. Add 1 pixel, otherwise the
+            # frame gets hidden.
+            table.setRowHeight(index.row(), editor.frameSize().height() + 1)
+        return editor
 
-    def __init__(self):
-        self._tags = self._from_config()
+    def sizeHint(self, option, index):
+        # Expand the row for multiline content, but limit the maximum row height.
+        size_hint = super().sizeHint(option, index)
+        return QtCore.QSize(size_hint.width(), min(160, size_hint.height()))
 
-    def _to_config(self):
-        config.setting[self.opt_name] = ", ".join(sorted(self._tags))
-
-    def _from_config(self):
-        tags = config.setting[self.opt_name].split(',')
-        return set(filter(bool, map(str.strip, tags)))
-
-    def add(self, name):
-        self._tags.add(name)
-        self._to_config()
-
-    def discard(self, name):
-        self._tags.discard(name)
-        self._to_config()
-
-    def __contains__(self, key):
-        return key in self._tags
+    def get_tag_name(self, index):
+        return index.data(QtCore.Qt.UserRole)
 
 
 class MetadataBox(QtWidgets.QTableWidget):
@@ -205,6 +209,8 @@ class MetadataBox(QtWidgets.QTableWidget):
         self.setTabKeyNavigation(False)
         self.setStyleSheet("QTableWidget {border: none;}")
         self.setAttribute(QtCore.Qt.WA_MacShowFocusRect, 1)
+        self.setItemDelegate(TableTagEditorDelegate(self))
+        self.setWordWrap(False)
         self.files = set()
         self.tracks = set()
         self.objects = set()
@@ -227,6 +233,8 @@ class MetadataBox(QtWidgets.QTableWidget):
         # TR: Keyboard shortcut for "Remove" (tag)
         self.remove_tag_shortcut = QtWidgets.QShortcut(QtGui.QKeySequence(_("Alt+Shift+R")), self, self.remove_selected_tags)
         self.preserved_tags = PreservedTags()
+        self._single_file_album = False
+        self._single_track_album = False
 
     def get_file_lookup(self):
         """Return a FileLookup object."""
@@ -244,6 +252,7 @@ class MetadataBox(QtWidgets.QTableWidget):
             "musicbrainz_artistid": lookup.artist_lookup,
             "musicbrainz_albumartistid": lookup.artist_lookup,
             "musicbrainz_releasegroupid": lookup.release_group_lookup,
+            "musicbrainz_discid": lookup.discid_lookup,
             "acoustid_id": lookup.acoust_lookup
         }
         return LOOKUP_TAGS
@@ -285,19 +294,28 @@ class MetadataBox(QtWidgets.QTableWidget):
                     self.clipboard = list(self.tag_diff.new[tag])
             elif e.key() == QtCore.Qt.Key_V and column == 2 and tag != "~length":
                 self.set_tag_values(tag, list(self.clipboard))
+                self.update()
         return super().event(e)
 
     def closeEditor(self, editor, hint):
         super().closeEditor(editor, hint)
         tag = self.tag_diff.tag_names[self.editing.row()]
         old = self.tag_diff.new[tag]
-        new = [editor.text()]
+        new = [self._get_editor_value(editor)]
         if old == new:
             self.editing.setText(old[0])
         else:
             self.set_tag_values(tag, new)
         self.editing = None
-        self.update()
+        self.update(drop_album_caches=tag == 'album')
+
+    @staticmethod
+    def _get_editor_value(editor):
+        if hasattr(editor, 'text'):
+            return editor.text()
+        elif hasattr(editor, 'toPlainText'):
+            return editor.toPlainText()
+        return ''
 
     def contextMenuEvent(self, event):
         menu = QtWidgets.QMenu(self)
@@ -336,21 +354,34 @@ class MetadataBox(QtWidgets.QTableWidget):
                         removals.append(partial(self.remove_tag, tag))
                     status = self.tag_diff.status[tag] & TagStatus.CHANGED
                     if status == TagStatus.CHANGED or status == TagStatus.REMOVED:
+                        file_tracks = []
+                        track_albums = set()
                         for file in self.files:
                             objects = [file]
                             if file.parent in self.tracks and len(self.files & set(file.parent.linked_files)) == 1:
                                 objects.append(file.parent)
+                                file_tracks.append(file.parent)
+                                track_albums.add(file.parent.album)
                             orig_values = list(file.orig_metadata.getall(tag)) or [""]
+                            useorigs.append(partial(self.set_tag_values, tag, orig_values, objects))
+                        for track in set(self.tracks)-set(file_tracks):
+                            objects = [track]
+                            orig_values = list(track.orig_metadata.getall(tag)) or [""]
+                            useorigs.append(partial(self.set_tag_values, tag, orig_values, objects))
+                            track_albums.add(track.album)
+                        for album in track_albums:
+                            objects = [album]
+                            orig_values = list(album.orig_metadata.getall(tag)) or [""]
                             useorigs.append(partial(self.set_tag_values, tag, orig_values, objects))
                 if removals:
                     remove_tag_action = QtWidgets.QAction(_("Remove"), self.parent)
-                    remove_tag_action.triggered.connect(lambda: [f() for f in removals])
+                    remove_tag_action.triggered.connect(partial(self._apply_update_funcs, removals))
                     remove_tag_action.setShortcut(self.remove_tag_shortcut.key())
                     menu.addAction(remove_tag_action)
                 if useorigs:
                     name = ngettext("Use Original Value", "Use Original Values", len(useorigs))
                     use_orig_value_action = QtWidgets.QAction(name, self.parent)
-                    use_orig_value_action.triggered.connect(lambda: [f() for f in useorigs])
+                    use_orig_value_action.triggered.connect(partial(self._apply_update_funcs, useorigs))
                     menu.addAction(use_orig_value_action)
                     menu.addSeparator()
             if len(tags) == 1 or removals or useorigs:
@@ -360,6 +391,11 @@ class MetadataBox(QtWidgets.QTableWidget):
         menu.addAction(self.changes_first_action)
         menu.exec_(event.globalPos())
         event.accept()
+
+    def _apply_update_funcs(self, funcs):
+        for f in funcs:
+            f()
+        self.parent.update_selection(new_selection=False, drop_album_caches=True)
 
     def edit_tag(self, tag):
         EditTagDialog(self.parent, tag).exec_()
@@ -382,11 +418,11 @@ class MetadataBox(QtWidgets.QTableWidget):
         if not values and self.tag_is_removable(tag):
             for obj in objects:
                 del obj.metadata[tag]
+                obj.update()
         elif values:
             for obj in objects:
                 obj.metadata[tag] = values
                 obj.update()
-        self.update()
         self.parent.ignore_selection_changes = False
 
     def remove_tag(self, tag):
@@ -396,6 +432,7 @@ class MetadataBox(QtWidgets.QTableWidget):
         for tag in self.selected_tags(discard=('~length',)):
             if self.tag_is_removable(tag):
                 self.remove_tag(tag)
+        self.parent.update_selection(new_selection=False, drop_album_caches=True)
 
     def tag_is_removable(self, tag):
         return self.tag_diff.status[tag] & TagStatus.NOTREMOVABLE == 0
@@ -436,15 +473,16 @@ class MetadataBox(QtWidgets.QTableWidget):
         self.selection_mutex.unlock()
 
     @throttle(100)
-    def update(self):
+    def update(self, drop_album_caches=False):
         if self.editing:
             return
+        new_selection = self.selection_dirty
         if self.selection_dirty:
             self._update_selection()
-        thread.run_task(self._update_tags, self._update_items,
+        thread.run_task(partial(self._update_tags, new_selection, drop_album_caches), self._update_items,
             thread_pool=self.tagger.priority_thread_pool)
 
-    def _update_tags(self):
+    def _update_tags(self, new_selection=True, drop_album_caches=False):
         self.selection_mutex.lock()
         files = self.files
         tracks = self.tracks
@@ -452,6 +490,24 @@ class MetadataBox(QtWidgets.QTableWidget):
 
         if not (files or tracks):
             return None
+
+        if new_selection or drop_album_caches:
+            self._single_file_album = len(set([file.metadata["album"] for file in files])) == 1
+            self._single_track_album = len(set([track.metadata["album"] for track in tracks])) == 1
+
+        while not new_selection:  # Just an if with multiple exit points
+            # If we are dealing with the same selection
+            # skip updates unless it we are dealing with a single file/track
+            if len(files) == 1:
+                break
+            if len(tracks) == 1:
+                break
+            # Or if we are dealing with a single cluster/album
+            if self._single_file_album:
+                break
+            if self._single_track_album:
+                break
+            return self.tag_diff
 
         self.colors = {
             TagStatus.NOCHANGE: self.palette().color(QtGui.QPalette.Text),
@@ -491,9 +547,13 @@ class MetadataBox(QtWidgets.QTableWidget):
 
         for track in tracks:
             if track.num_linked_files == 0:
-                for name, values in track.metadata.rawitems():
+                for name, new_values in track.metadata.rawitems():
                     if not name.startswith("~"):
-                        tag_diff.add(name, values, values, True)
+                        if name in track.orig_metadata:
+                            orig_values = track.orig_metadata.getall(name)
+                        else:
+                            orig_values = new_values
+                        tag_diff.add(name, orig_values, new_values, True)
 
                 length = str(track.metadata.length)
                 tag_diff.add("~length", length, length, False)
@@ -501,7 +561,7 @@ class MetadataBox(QtWidgets.QTableWidget):
                 tag_diff.objects += 1
 
         all_tags = set(list(orig_tags.keys()) + list(new_tags.keys()))
-        common_tags = [tag for tag in COMMON_TAGS if tag in all_tags]
+        common_tags = [tag for tag in config.setting['metadatabox_top_tags'] if tag in all_tags]
         tag_names = common_tags + sorted(all_tags.difference(common_tags),
                                          key=lambda x: display_tag_name(x).lower())
 
@@ -578,8 +638,17 @@ class MetadataBox(QtWidgets.QTableWidget):
             orig_item.setForeground(color)
             new_item.setForeground(color)
 
+            alignment = QtCore.Qt.AlignLeft | QtCore.Qt.AlignTop
+            tag_item.setTextAlignment(alignment)
+            orig_item.setTextAlignment(alignment)
+            new_item.setTextAlignment(alignment)
+
+            # Adjust row height to content size
+            self.setRowHeight(i, self.sizeHintForRow(i))
+
     def set_item_value(self, item, tags, name):
         text, italic = tags.display_value(name)
+        item.setData(QtCore.Qt.UserRole, name)
         item.setText(text)
         font = item.font()
         font.setItalic(italic)

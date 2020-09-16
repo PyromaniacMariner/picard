@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 set -e
 
-if [ -z "$TRAVIS_TAG" ]
-then
-    python3 setup.py patch_version --platform=osx.$TRAVIS_OSX_IMAGE
+if [ -z "$TRAVIS_TAG" ] && [ -n "$TRAVIS_OSX_IMAGE" ]; then
+    python3 setup.py patch_version --platform="osx.$TRAVIS_OSX_IMAGE"
 fi
 VERSION=$(python3 -c 'import picard; print(picard.__version__)')
 
@@ -44,7 +43,7 @@ if [ -f scripts/package/appledev.p12 ] && [ -n "$appledev_p12_password" ]; then
 fi
 
 # Submit app for notarization on macOS >= 10.14
-if [ $MACOS_VERSION_MAJOR -eq 10 ] && [ $MACOS_VERSION_MINOR -ge 14 ]; then
+if [ "$MACOS_VERSION_MAJOR" -eq 10 ] && [ "$MACOS_VERSION_MINOR" -ge 14 ]; then
     NOTARIZE=1
 fi
 
@@ -57,20 +56,22 @@ mv 'MusicBrainz Picard.tmp' 'MusicBrainz Picard.app'
 if [ "$CODESIGN" = '1' ]; then
     # Enable hardened runtime if app will get notarized
     if [ "$NOTARIZE" = "1" ]; then
-      HARDENED_RUNTIME_ARGS="--options runtime --entitlements ../scripts/package/entitlements.plist"
-    fi
-    codesign --verify --verbose --deep \
-        $HARDENED_RUNTIME_ARGS \
-        --keychain $KEYCHAIN_PATH --sign "$CERTIFICATE_NAME" \
+      codesign --verify --verbose --deep \
+        --options runtime \
+        --entitlements ../scripts/package/entitlements.plist \
+        --keychain "$KEYCHAIN_PATH" --sign "$CERTIFICATE_NAME" \
         "MusicBrainz Picard.app"
-    if [ "$NOTARIZE" = "1" ]; then
-        ../scripts/package/macos-notarize-app.sh "MusicBrainz Picard.app"
+      ../scripts/package/macos-notarize-app.sh "MusicBrainz Picard.app"
+    else
+      codesign --verify --verbose --deep \
+        --keychain "$KEYCHAIN_PATH" --sign "$CERTIFICATE_NAME" \
+        "MusicBrainz Picard.app"
     fi
 fi
 
 # Verify Picard executable works and required dependencies are bundled
 VERSIONS=$("MusicBrainz Picard.app/Contents/MacOS/picard-run" --long-version)
-echo $VERSIONS
+echo "$VERSIONS"
 ASTRCMP_REGEX="astrcmp C"
 [[ $VERSIONS =~ $ASTRCMP_REGEX ]] || (echo "Failed: Build does not include astrcmp C" && false)
 LIBDISCID_REGEX="libdiscid [0-9]+\.[0-9]+\.[0-9]+"
@@ -78,11 +79,15 @@ LIBDISCID_REGEX="libdiscid [0-9]+\.[0-9]+\.[0-9]+"
 "MusicBrainz Picard.app/Contents/MacOS/fpcalc" -version
 
 # Package app bundle into DMG image
-DMG="MusicBrainz Picard $VERSION macOS $MACOS_VERSION_MAJOR.$MACOS_VERSION_MINOR.dmg"
+if [ -n "$TRAVIS_OSX_IMAGE" ]; then
+  DMG="MusicBrainz-Picard-${VERSION}_macOS-$MACOS_VERSION_MAJOR.$MACOS_VERSION_MINOR.dmg"
+else
+  DMG="MusicBrainz-Picard-$VERSION.dmg"
+fi
 hdiutil create -volname "MusicBrainz Picard $VERSION" \
   -srcfolder 'MusicBrainz Picard.app' -ov -format UDBZ "$DMG"
 [ "$CODESIGN" = '1' ] && codesign --verify --verbose \
-  --keychain $KEYCHAIN_PATH --sign "$CERTIFICATE_NAME" "$DMG"
+  --keychain "$KEYCHAIN_PATH" --sign "$CERTIFICATE_NAME" "$DMG"
 md5 -r "$DMG"
 
 if [ -n "$UPLOAD_OSX" ]; then

@@ -1,8 +1,28 @@
+# -*- coding: utf-8 -*-
+#
+# Picard, the next-generation MusicBrainz tagger
+#
+# Copyright (C) 2019-2020 Philipp Wolfer
+# Copyright (C) 2020 Laurent Monin
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 2
+# of the License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
+
+
 import base64
 import logging
 import os
-import shutil
-from tempfile import mkstemp
 
 from mutagen.flac import (
     Padding,
@@ -21,6 +41,7 @@ from picard import (
 )
 from picard.coverart.image import CoverArtImage
 from picard.formats import vorbis
+from picard.formats.util import open_ as open_format
 from picard.metadata import Metadata
 
 from .common import (
@@ -134,6 +155,24 @@ class CommonVorbisTests:
             self.assertTrue(self.format.supports_tag(performer_tag))
             self.assertTrue(self.format.supports_tag('lyrics:foó'))
             self.assertTrue(self.format.supports_tag('comment:foó'))
+
+        @skipUnlessTestfile
+        def test_delete_totaldiscs_totaltracks(self):
+            # Create a test file that contains only disctotal / tracktotal,
+            # but not totaldiscs and totaltracks
+            save_raw(self.filename, {
+                'disctotal': '3',
+                'tracktotal': '2',
+            })
+            metadata = Metadata()
+            del metadata['totaldiscs']
+            del metadata['totaltracks']
+            save_metadata(self.filename, metadata)
+            loaded_metadata = load_raw(self.filename)
+            self.assertNotIn('disctotal', loaded_metadata)
+            self.assertNotIn('totaldiscs', loaded_metadata)
+            self.assertNotIn('tracktotal', loaded_metadata)
+            self.assertNotIn('totaltracks', loaded_metadata)
 
 
 class FLACTest(CommonVorbisTests.VorbisTestCase):
@@ -307,21 +346,31 @@ class FlacCoverArtTest(CommonCoverArtTests.CoverArtTestCase):
 class OggAudioVideoFileTest(PicardTestCase):
     def test_ogg_audio(self):
         self._test_file_is_type(
-            vorbis.OggAudioFile,
+            open_format,
             self._copy_file_tmp('test-oggflac.oga', '.oga'),
             vorbis.OggFLACFile)
         self._test_file_is_type(
-            vorbis.OggAudioFile,
+            open_format,
             self._copy_file_tmp('test.spx', '.oga'),
             vorbis.OggSpeexFile)
         self._test_file_is_type(
-            vorbis.OggAudioFile,
+            open_format,
             self._copy_file_tmp('test.ogg', '.oga'),
             vorbis.OggVorbisFile)
 
+    def test_ogg_opus(self):
+        self._test_file_is_type(
+            open_format,
+            self._copy_file_tmp('test.opus', '.oga'),
+            vorbis.OggOpusFile)
+        self._test_file_is_type(
+            open_format,
+            self._copy_file_tmp('test.opus', '.ogg'),
+            vorbis.OggOpusFile)
+
     def test_ogg_video(self):
         self._test_file_is_type(
-            vorbis.OggVideoFile,
+            open_format,
             self._copy_file_tmp('test.ogv', '.ogv'),
             vorbis.OggTheoraFile)
 
@@ -330,11 +379,8 @@ class OggAudioVideoFileTest(PicardTestCase):
         self.assertIsInstance(f, expected_type)
 
     def _copy_file_tmp(self, filename, ext):
-        fd, copy = mkstemp(suffix=ext)
-        self.addCleanup(os.unlink, copy)
-        os.close(fd)
-        shutil.copy(os.path.join('test', 'data', filename), copy)
-        return copy
+        path = os.path.join('test', 'data', filename)
+        return self.copy_file_tmp(path, ext)
 
 
 class OggCoverArtTest(CommonCoverArtTests.CoverArtTestCase):

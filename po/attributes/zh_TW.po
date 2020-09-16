@@ -1,19 +1,21 @@
 # 
 # Translators:
+# alvn Lin <alvn@gmx.com>, 2020
 # Bai yun-xi <email address hidden>, 2016
 # byx <myhouse472@gmail.com>, 2016
+# Fei Kuan <fei_fei_0316@hotmail.com>, 2020
 # Shen-Ta Hsieh(BestSteve) <ibmibmibm.tw@gmail.com>, 2014,2016
 # Koala Bear <email address hidden>, 2016
-# Koala Bear <koalaleaves@openmailbox.org>, 2016
+# 86b513c9fcd360370d0ce0bce007e7ff, 2016
 # riotism, 2017
 # Shen-Ta Hsieh(BestSteve) <ibmibmibm.tw@gmail.com>, 2016
 # Shen-Ta Hsieh(BestSteve) <email address hidden>, 2014,2016,2018
-# Shen-Ta Hsieh(BestSteve) <ibmibmibm.tw@gmail.com>, 2016,2018
+# Shen-Ta Hsieh(BestSteve) <ibmibmibm.tw@gmail.com>, 2016,2018,2020
 # riotism, 2017
 msgid ""
 msgstr ""
 "Project-Id-Version: MusicBrainz\n"
-"PO-Revision-Date: 2019-10-21 23:42+0000\n"
+"PO-Revision-Date: 2020-09-03 17:21+0000\n"
 "Last-Translator: Michael Wiencek <mwtuea@gmail.com>\n"
 "Language-Team: Chinese (Taiwan) (http://www.transifex.com/musicbrainz/musicbrainz/language/zh_TW/)\n"
 "MIME-Version: 1.0\n"
@@ -90,7 +92,7 @@ msgstr "8英吋雷射影碟"
 #: DB:medium_format/name:78
 msgctxt "medium_format"
 msgid "8-Track Cartridge"
-msgstr ""
+msgstr "8軌磁帶"
 
 #: DB:medium_format/name:34
 msgctxt "medium_format"
@@ -112,12 +114,12 @@ msgstr "每分鐘90轉，垂直切割的蟲膠唱片，於1906年至1932年間�
 #: DB:work_attribute_type_allowed_value/value:794
 msgctxt "work_attribute_type_allowed_value"
 msgid "A Dorian"
-msgstr "A多里安"
+msgstr "A Dorian調式"
 
 #: DB:work_attribute_type_allowed_value/value:806
 msgctxt "work_attribute_type_allowed_value"
 msgid "A Mixolydian"
-msgstr "A米索利地安"
+msgstr "A Mixolydian調式"
 
 #: DB:work_type/description:2
 msgctxt "work_type"
@@ -160,7 +162,7 @@ msgctxt "instrument_type"
 msgid ""
 "A grouping of related but different instruments, like the different violin-"
 "like instruments"
-msgstr ""
+msgstr "一組相關但不同的樂器，如各種提琴類樂器。"
 
 #: DB:work_attribute_type_allowed_value/value:28
 msgctxt "work_attribute_type_allowed_value"
@@ -211,7 +213,7 @@ msgstr "書尾附有 CD 袋的書"
 msgctxt "place_type"
 msgid ""
 "A place (generally a factory) at which physical media are manufactured."
-msgstr ""
+msgstr "一個生產實體媒體的地點（通常是生產工廠）。"
 
 #: DB:place_type/description:5
 msgctxt "place_type"
@@ -361,7 +363,7 @@ msgid ""
 "A suite is an ordered set of instrumental or orchestral pieces normally "
 "performed in a concert setting. They may be extracts from a ballet or opera,"
 " or entirely original movements."
-msgstr ""
+msgstr "組曲是一組有序的樂器或管弦樂作品，通常在音樂會上演出。它們可能是芭蕾或歌劇的摘錄，也可能是原創的樂章。"
 
 #: DB:work_type/description:18
 msgctxt "work_type"
@@ -369,7 +371,7 @@ msgid ""
 "A symphonic poem is a piece of programmatic orchestral music, usually in a "
 "single movement, that evokes a painting, a landscape, the content of a poem,"
 " a story or novel, or other non-musical source."
-msgstr ""
+msgstr "交響詩是一段程序性的管弦樂，通常為單樂章，並且對應一幅畫，一處景點，一首詩歌的內容，一篇故事或小說或其他非音樂來源。"
 
 #: DB:work_type/description:16
 msgctxt "work_type"
@@ -389,7 +391,7 @@ msgid ""
 "A zarzuela is a Spanish lyric-dramatic work that alternates between spoken "
 "and sung scenes, the latter incorporating operatic and popular song, as well"
 " as dance."
-msgstr ""
+msgstr "西班牙輕歌劇是一種西班牙的抒情戲劇作品，在口語和歌唱場景之間交替，後者融合了歌劇和流行歌曲以及舞蹈。"
 
 #: DB:work_attribute_type_allowed_value/value:26
 msgctxt "work_attribute_type_allowed_value"
@@ -411,15 +413,50 @@ msgctxt "work_attribute_type_allowed_value"
 msgid "A-sharp minor"
 msgstr "升A小調"
 
+#: DB:work_attribute_type/name:44
+msgctxt "work_attribute_type"
+msgid "ACAM ID"
+msgstr ""
+
+#: DB:work_attribute_type/name:47
+msgctxt "work_attribute_type"
+msgid "ACDAM ID"
+msgstr ""
+
+#: DB:work_attribute_type/name:43
+msgctxt "work_attribute_type"
+msgid "AGADU ID"
+msgstr ""
+
 #: DB:work_attribute_type/name:23
 msgctxt "work_attribute_type"
 msgid "AKM ID"
 msgstr "AKM ID"
 
+#: DB:work_attribute_type/name:38
+msgctxt "work_attribute_type"
+msgid "AMRA ID"
+msgstr ""
+
+#: DB:work_attribute_type/name:46
+msgctxt "work_attribute_type"
+msgid "APA ID"
+msgstr ""
+
+#: DB:work_attribute_type/name:41
+msgctxt "work_attribute_type"
+msgid "APDAYC ID"
+msgstr ""
+
 #: DB:work_attribute_type/name:13
 msgctxt "work_attribute_type"
 msgid "APRA ID"
 msgstr "APRA ID"
+
+#: DB:work_attribute_type/name:48
+msgctxt "work_attribute_type"
+msgid "ARTISJUS ID"
+msgstr ""
 
 #: DB:work_attribute_type/name:6
 msgctxt "work_attribute_type"
@@ -577,7 +614,7 @@ msgctxt "work_type"
 msgid ""
 "An audio drama is a dramatized, purely acoustic performance, broadcast on "
 "radio or published on an audio medium (tape, CD, etc.)."
-msgstr ""
+msgstr "廣播劇是一種戲劇化的，純聲學的表演，可以通過廣播播放或通過音訊媒介 (磁帶，CD等) 發布。"
 
 #: DB:event_type/description:2
 msgctxt "event_type"
@@ -599,7 +636,7 @@ msgid ""
 "An opera is a dramatised work (text + musical score) for singers and "
 "orchestra/ensemble. In true operas all dialog is sung, through arias and "
 "recitatives, but some styles of opera include spoken dialogue."
-msgstr ""
+msgstr "歌劇是歌手和管弦樂隊／合奏團的戲劇作品 (文字+樂譜)。在真正的歌劇中，所有對話都是通過詠嘆調和朗誦來進行的，但是某些形式的歌劇包含口語對話。"
 
 #: DB:work_type/description:11
 msgctxt "work_type"
@@ -608,7 +645,7 @@ msgid ""
 "orchestra, a choir, and soloists. While it has characters and a plot, it is "
 "usually not performed theatrically (it lacks costumes, props and strong "
 "character interaction)."
-msgstr ""
+msgstr "神劇是大型的 (通常是神聖的) 音樂作品，包括樂團，合唱團和獨奏家。雖然有角色和劇情，但通常不進行戲劇表演 (缺少服裝，道具和強烈的角色互動)。"
 
 #: DB:work_type/description:12
 msgctxt "work_type"
@@ -616,7 +653,7 @@ msgid ""
 "An overture is, generally, the instrumental introduction to an opera. "
 "Independent (\"concert\") overtures also exist, which are generally "
 "programmatic works shorter than a symphonic poem."
-msgstr ""
+msgstr "序曲通常是純樂器的歌劇開場音樂。還存在獨立的「音樂會」序曲，通常是比交響詩短的程序化作品。"
 
 #: DB:release_status/description:3
 msgctxt "release_status"
@@ -632,7 +669,7 @@ msgid ""
 "An étude is an instrumental musical composition, most commonly of "
 "considerable difficulty, usually designed to provide practice material for "
 "perfecting a particular technical skill."
-msgstr ""
+msgstr "練習曲是一種樂器音樂作品，大多被認為難度很高，通常設計來提供練習材料以完善特定的演奏技術。"
 
 #: DB:work_attribute_type_allowed_value/value:310
 msgctxt "work_attribute_type_allowed_value"
@@ -744,12 +781,12 @@ msgstr "會出席"
 #: DB:release_group_secondary_type/name:11
 msgctxt "release_group_secondary_type"
 msgid "Audio drama"
-msgstr "音樂劇"
+msgstr "廣播劇"
 
 #: DB:work_type/name:25
 msgctxt "work_type"
 msgid "Audio drama"
-msgstr "音樂劇"
+msgstr "廣播劇"
 
 #: DB:release_group_secondary_type/name:5
 msgctxt "release_group_secondary_type"
@@ -909,7 +946,7 @@ msgstr ""
 #: DB:cover_art_archive.art_type/name:2
 msgctxt "cover_art_type"
 msgid "Back"
-msgstr "上一頁"
+msgstr "背面"
 
 #: DB:work_attribute_type_allowed_value/value:323
 msgctxt "work_attribute_type_allowed_value"
@@ -1385,6 +1422,11 @@ msgctxt "medium_format"
 msgid "CED"
 msgstr "CED"
 
+#: DB:work_attribute_type/name:45
+msgctxt "work_attribute_type"
+msgid "COMPASS ID"
+msgstr ""
+
 #: DB:work_attribute_type_allowed_value/value:63
 msgctxt "work_attribute_type_allowed_value"
 msgid "Cakravākaṁ"
@@ -1671,7 +1713,7 @@ msgstr "DCC"
 #: DB:release_group_secondary_type/name:8
 msgctxt "release_group_secondary_type"
 msgid "DJ-mix"
-msgstr "DJ-mix"
+msgstr "DJ 混音"
 
 #: DB:medium_format/name:44
 msgctxt "medium_format"
@@ -1701,17 +1743,17 @@ msgstr "DVDplus"
 #: DB:medium_format/name:70
 msgctxt "medium_format"
 msgid "DVDplus (CD side)"
-msgstr "DVDplus（CD 面）"
+msgstr "DVDplus (CD 面)"
 
 #: DB:medium_format/name:68
 msgctxt "medium_format"
 msgid "DVDplus (DVD-Audio side)"
-msgstr "DVDplus（DVD-Audio 面）"
+msgstr "DVDplus (DVD-Audio 面)"
 
 #: DB:medium_format/name:69
 msgctxt "medium_format"
 msgid "DVDplus (DVD-Video side)"
-msgstr "DVDplus（DVD-Video 面）"
+msgstr "DVDplus (DVD-Video 面)"
 
 #: DB:work_attribute_type_allowed_value/value:343
 msgctxt "work_attribute_type_allowed_value"
@@ -1972,17 +2014,17 @@ msgstr "DualDisc"
 #: DB:medium_format/name:67
 msgctxt "medium_format"
 msgid "DualDisc (CD side)"
-msgstr "DualDisc（CD面）"
+msgstr "DualDisc (CD面)"
 
 #: DB:medium_format/name:65
 msgctxt "medium_format"
 msgid "DualDisc (DVD-Audio side)"
-msgstr "DualDisc（DVD-Audio面）"
+msgstr "DualDisc (DVD-Audio面)"
 
 #: DB:medium_format/name:66
 msgctxt "medium_format"
 msgid "DualDisc (DVD-Video side)"
-msgstr "DualDisc（DVD-Video面）"
+msgstr "DualDisc (DVD-Video面)"
 
 #: DB:work_attribute_type_allowed_value/value:612
 msgctxt "work_attribute_type_allowed_value"
@@ -2151,6 +2193,11 @@ msgctxt "work_attribute_type_allowed_value"
 msgid "E-sharp minor"
 msgstr "升E小調"
 
+#: DB:work_attribute_type/name:37
+msgctxt "work_attribute_type"
+msgid "ECAD ID"
+msgstr ""
+
 #: DB:release_group_primary_type/name:3
 msgctxt "release_group_primary_type"
 msgid "EP"
@@ -2209,7 +2256,7 @@ msgstr "活動名稱"
 #: DB:series_type/name:6
 msgctxt "series_type"
 msgid "Event series"
-msgstr ""
+msgstr "活動系列"
 
 #: DB:work_attribute_type_allowed_value/value:729
 msgctxt "work_attribute_type_allowed_value"
@@ -2986,12 +3033,12 @@ msgstr "Hybrid SACD"
 #: DB:medium_format/name:63
 msgctxt "medium_format"
 msgid "Hybrid SACD (CD layer)"
-msgstr "Hybrid SACD（CD層）"
+msgstr "Hybrid SACD (CD層)"
 
 #: DB:medium_format/name:64
 msgctxt "medium_format"
 msgid "Hybrid SACD (SACD layer)"
-msgstr "Hybrid SACD（SACD層）"
+msgstr "Hybrid SACD (SACD層)"
 
 #: DB:work_attribute_type_allowed_value/value:418
 msgctxt "work_attribute_type_allowed_value"
@@ -3068,35 +3115,201 @@ msgctxt "work_attribute_type"
 msgid "ICE ID"
 msgstr ""
 
+#: DB:work_attribute_type/description:34
+msgctxt "work_attribute_type"
+msgid "ID assigned to a work by the British rights society PRS for Music"
+msgstr ""
+
+#: DB:work_attribute_type/description:22
+msgctxt "work_attribute_type"
+msgid ""
+"ID for rights intermediaries Christian Copyright Licensing International"
+msgstr ""
+
+#: DB:work_attribute_type/description:24
+msgctxt "work_attribute_type"
+msgid "ID for the Argentinean rights society SADAIC"
+msgstr ""
+
+#: DB:work_attribute_type/description:13
+msgctxt "work_attribute_type"
+msgid "ID for the Australasian rights society APRA"
+msgstr ""
+
+#: DB:work_attribute_type/description:23
+msgctxt "work_attribute_type"
+msgid "ID for the Austrian rights society AKM"
+msgstr ""
+
 #: DB:work_attribute_type/description:28
 msgctxt "work_attribute_type"
 msgid "ID for the Belgian rights society SABAM"
-msgstr "比利時維權協會 SABAM 的 ID"
+msgstr "比利時著作權機構 SABAM 的 ID"
+
+#: DB:work_attribute_type/description:37
+msgctxt "work_attribute_type"
+msgid "ID for the Brazilian rights society ECAD"
+msgstr ""
+
+#: DB:work_attribute_type/description:10
+msgctxt "work_attribute_type"
+msgid "ID for the Canadian rights society SOCAN"
+msgstr ""
+
+#: DB:work_attribute_type/description:39
+msgctxt "work_attribute_type"
+msgid "ID for the Colombian rights society SAYCO"
+msgstr ""
+
+#: DB:work_attribute_type/description:44
+msgctxt "work_attribute_type"
+msgid "ID for the Costa Rican rights society ACAM"
+msgstr ""
+
+#: DB:work_attribute_type/description:47
+msgctxt "work_attribute_type"
+msgid "ID for the Cuban rights society ACDAM"
+msgstr ""
+
+#: DB:work_attribute_type/description:25
+msgctxt "work_attribute_type"
+msgid "ID for the Czech rights society OSA"
+msgstr ""
+
+#: DB:work_attribute_type/description:26
+msgctxt "work_attribute_type"
+msgid "ID for the Dutch rights society BUMA/STEMRA"
+msgstr ""
+
+#: DB:work_attribute_type/description:40
+msgctxt "work_attribute_type"
+msgid "ID for the Ecuadorian rights society SAYCE"
+msgstr ""
+
+#: DB:work_attribute_type/description:21
+msgctxt "work_attribute_type"
+msgid "ID for the French rights society Sacem"
+msgstr ""
+
+#: DB:work_attribute_type/description:9
+msgctxt "work_attribute_type"
+msgid "ID for the German rights society GEMA"
+msgstr ""
+
+#: DB:work_attribute_type/description:19
+msgctxt "work_attribute_type"
+msgid "ID for the Hong Kong rights society CASH"
+msgstr ""
+
+#: DB:work_attribute_type/description:48
+msgctxt "work_attribute_type"
+msgid "ID for the Hungarian rights society ARTISJUS"
+msgstr ""
 
 #: DB:work_attribute_type/description:29
 msgctxt "work_attribute_type"
 msgid "ID for the International Copyright Enterprise"
 msgstr "International Copyright Enterprise 的 ID"
 
+#: DB:work_attribute_type/description:36
+msgctxt "work_attribute_type"
+msgid "ID for the Italian rights society SIAE"
+msgstr ""
+
 #: DB:work_attribute_type/description:3
 msgctxt "work_attribute_type"
 msgid "ID for the Japanese rights society JASRAC"
-msgstr ""
+msgstr "日本著作權機構 JASRAC 的 ID"
 
 #: DB:work_attribute_type/description:33
 msgctxt "work_attribute_type"
 msgid "ID for the Japanese rights society NexTone"
+msgstr "日本著作權機構 NexTone 的 ID"
+
+#: DB:work_attribute_type/description:11
+msgctxt "work_attribute_type"
+msgid "ID for the Korean rights society KOMCA"
+msgstr ""
+
+#: DB:work_attribute_type/description:49
+msgctxt "work_attribute_type"
+msgid "ID for the Malaysian rights society MACP"
 msgstr ""
 
 #: DB:work_attribute_type/description:27
 msgctxt "work_attribute_type"
 msgid "ID for the Mexican rights society SACM"
-msgstr "墨西哥維權協會 SACM 的 ID"
+msgstr "墨西哥著作權機構 SACM 的 ID"
+
+#: DB:work_attribute_type/description:46
+msgctxt "work_attribute_type"
+msgid "ID for the Paraguayan rights society APA"
+msgstr ""
+
+#: DB:work_attribute_type/description:41
+msgctxt "work_attribute_type"
+msgid "ID for the Peruvian rights society APDAYC"
+msgstr ""
 
 #: DB:work_attribute_type/description:30
 msgctxt "work_attribute_type"
 msgid "ID for the Polish rights society ZAiKS"
-msgstr "波蘭維權協會 ZAiKS 的 ID"
+msgstr "波蘭著作權機構 ZAiKS 的 ID"
+
+#: DB:work_attribute_type/description:35
+msgctxt "work_attribute_type"
+msgid "ID for the Portuguese rights society SPA"
+msgstr ""
+
+#: DB:work_attribute_type/description:45
+msgctxt "work_attribute_type"
+msgid "ID for the Singaporean rights society COMPASS"
+msgstr ""
+
+#: DB:work_attribute_type/description:20
+msgctxt "work_attribute_type"
+msgid "ID for the Spanish rights society SGAE"
+msgstr ""
+
+#: DB:work_attribute_type/description:18
+msgctxt "work_attribute_type"
+msgid "ID for the Swiss rights society SUISA"
+msgstr ""
+
+#: DB:work_attribute_type/description:12
+msgctxt "work_attribute_type"
+msgid "ID for the Taiwanese rights society MÜST"
+msgstr ""
+
+#: DB:work_attribute_type/description:6
+msgctxt "work_attribute_type"
+msgid "ID for the US rights society ASCAP"
+msgstr ""
+
+#: DB:work_attribute_type/description:7
+msgctxt "work_attribute_type"
+msgid "ID for the US rights society BMI"
+msgstr ""
+
+#: DB:work_attribute_type/description:8
+msgctxt "work_attribute_type"
+msgid "ID for the US rights society SESAC"
+msgstr ""
+
+#: DB:work_attribute_type/description:43
+msgctxt "work_attribute_type"
+msgid "ID for the Uruguayan rights society AGADU"
+msgstr ""
+
+#: DB:work_attribute_type/description:42
+msgctxt "work_attribute_type"
+msgid "ID for the Venezuelan rights society SACVEN"
+msgstr ""
+
+#: DB:work_attribute_type/description:38
+msgctxt "work_attribute_type"
+msgid "ID for the international (formerly US) rights society AMRA"
+msgstr ""
 
 #: DB:work_attribute_type/name:14
 msgctxt "work_attribute_type"
@@ -3116,14 +3329,14 @@ msgstr "廠牌"
 #: DB:work_type/name:30
 msgctxt "work_type"
 msgid "Incidental music"
-msgstr "伴奏"
+msgstr "配樂"
 
 #: DB:work_type/description:30
 msgctxt "work_type"
 msgid ""
 "Incidental music is music written as background for (usually) a theatre "
 "play."
-msgstr ""
+msgstr "配樂 (通常) 是作為戲劇的背景音樂。"
 
 #: DB:place_type/name:5
 msgctxt "place_type"
@@ -3835,16 +4048,21 @@ msgstr ""
 #: DB:cover_art_archive.art_type/name:12
 msgctxt "cover_art_type"
 msgid "Liner"
-msgstr ""
+msgstr "襯墊"
 
 #: DB:release_group_secondary_type/name:6
 msgctxt "release_group_secondary_type"
 msgid "Live"
-msgstr "現場錄音"
+msgstr "現場"
 
 #: DB:work_attribute_type_allowed_value/value:636
 msgctxt "work_attribute_type_allowed_value"
 msgid "Longa"
+msgstr ""
+
+#: DB:work_attribute_type/name:49
+msgctxt "work_attribute_type"
+msgid "MACP ID"
 msgstr ""
 
 #: DB:work_attribute_type_allowed_value/value:963
@@ -3880,7 +4098,7 @@ msgstr ""
 #: DB:work_type/name:7
 msgctxt "work_type"
 msgid "Madrigal"
-msgstr ""
+msgstr "牧歌"
 
 #: DB:work_attribute_type_allowed_value/value:163
 msgctxt "work_attribute_type_allowed_value"
@@ -4150,7 +4368,7 @@ msgstr ""
 #: DB:work_type/name:9
 msgctxt "work_type"
 msgid "Motet"
-msgstr ""
+msgstr "經文歌"
 
 #: DB:work_attribute_type_allowed_value/value:746
 msgctxt "work_attribute_type_allowed_value"
@@ -4770,7 +4988,7 @@ msgstr "OSA ID"
 #: DB:cover_art_archive.art_type/name:5
 msgctxt "cover_art_type"
 msgid "Obi"
-msgstr ""
+msgstr "書腰"
 
 #: DB:release_status/name:1
 msgctxt "release_status"
@@ -4795,7 +5013,7 @@ msgstr "神劇"
 #: DB:artist_type/name:5
 msgctxt "artist_type"
 msgid "Orchestra"
-msgstr "樂團"
+msgstr "管弦樂團"
 
 #: DB:label_type/name:4
 msgctxt "label_type"
@@ -4860,6 +5078,11 @@ msgstr ""
 #: DB:work_attribute_type_allowed_value/value:652
 msgctxt "work_attribute_type_allowed_value"
 msgid "Oyunhavası"
+msgstr ""
+
+#: DB:work_attribute_type/name:34
+msgctxt "work_attribute_type"
+msgid "PRS tune code"
 msgstr ""
 
 #: DB:work_attribute_type_allowed_value/value:993
@@ -5031,7 +5254,7 @@ msgstr ""
 #: DB:place_type/name:8
 msgctxt "place_type"
 msgid "Pressing plant"
-msgstr ""
+msgstr "壓片廠"
 
 #: DB:label_type/name:3
 msgctxt "label_type"
@@ -5046,7 +5269,7 @@ msgstr "促銷"
 #: DB:work_type/name:23
 msgctxt "work_type"
 msgid "Prose"
-msgstr ""
+msgstr "散文句"
 
 #: DB:release_status/name:4
 msgctxt "release_status"
@@ -5222,7 +5445,7 @@ msgstr ""
 #: DB:cover_art_archive.art_type/name:14
 msgctxt "cover_art_type"
 msgid "Raw/Unedited"
-msgstr ""
+msgstr "未加工/未編輯"
 
 #: DB:editor_collection_type/name:12
 msgctxt "collection_type"
@@ -5237,7 +5460,7 @@ msgstr "錄音名稱"
 #: DB:series_type/name:3
 msgctxt "series_type"
 msgid "Recording series"
-msgstr ""
+msgstr "錄音系列"
 
 #: DB:medium_format/name:10
 msgctxt "medium_format"
@@ -5277,7 +5500,7 @@ msgstr "發行組名稱"
 #: DB:series_type/name:1
 msgctxt "series_type"
 msgid "Release group series"
-msgstr ""
+msgstr "發行組系列"
 
 #: DB:release_alias_type/name:1
 msgctxt "alias_type"
@@ -5287,7 +5510,7 @@ msgstr "發行品名稱"
 #: DB:series_type/name:2
 msgctxt "series_type"
 msgid "Release series"
-msgstr ""
+msgstr "發行品系列"
 
 #: DB:place_type/name:6
 msgctxt "place_type"
@@ -5460,10 +5683,25 @@ msgctxt "work_attribute_type"
 msgid "SACM ID"
 msgstr "SACM ID"
 
+#: DB:work_attribute_type/name:42
+msgctxt "work_attribute_type"
+msgid "SACVEN ID"
+msgstr ""
+
 #: DB:work_attribute_type/name:24
 msgctxt "work_attribute_type"
 msgid "SADAIC ID"
 msgstr "SADAIC ID"
+
+#: DB:work_attribute_type/name:40
+msgctxt "work_attribute_type"
+msgid "SAYCE ID"
+msgstr ""
+
+#: DB:work_attribute_type/name:39
+msgctxt "work_attribute_type"
+msgid "SAYCO ID"
+msgstr ""
 
 #: DB:medium_format/name:62
 msgctxt "medium_format"
@@ -5490,10 +5728,20 @@ msgctxt "medium_format"
 msgid "SHM-SACD"
 msgstr "SHM-SACD"
 
+#: DB:work_attribute_type/name:36
+msgctxt "work_attribute_type"
+msgid "SIAE ID"
+msgstr ""
+
 #: DB:work_attribute_type/name:10
 msgctxt "work_attribute_type"
 msgid "SOCAN ID"
 msgstr "SOCAN ID"
+
+#: DB:work_attribute_type/name:35
+msgctxt "work_attribute_type"
+msgid "SPA ID"
+msgstr ""
 
 #: DB:work_attribute_type/name:18
 msgctxt "work_attribute_type"
@@ -5814,7 +6062,7 @@ msgstr "原聲音樂"
 #: DB:cover_art_archive.art_type/name:6
 msgctxt "cover_art_type"
 msgid "Spine"
-msgstr "書脊"
+msgstr "書背"
 
 #: DB:release_group_secondary_type/name:3
 msgctxt "release_group_secondary_type"
@@ -5829,7 +6077,7 @@ msgstr "大型運動場"
 #: DB:cover_art_archive.art_type/name:10
 msgctxt "cover_art_type"
 msgid "Sticker"
-msgstr "標籤"
+msgstr "貼紙"
 
 #: DB:instrument_type/name:2
 msgctxt "instrument_type"
@@ -5872,7 +6120,7 @@ msgstr ""
 #: DB:work_type/name:6
 msgctxt "work_type"
 msgid "Suite"
-msgstr ""
+msgstr "組曲"
 
 #: DB:work_attribute_type_allowed_value/value:534
 msgctxt "work_attribute_type_allowed_value"
@@ -6201,21 +6449,21 @@ msgctxt "medium_format"
 msgid ""
 "The DVD (audio) layer of a DVDplus. The CD layer should be added as a "
 "separate medium."
-msgstr "DVDplus的DVD（音訊）層。CD層應新增為別的媒體。"
+msgstr "DVDplus的DVD (音訊) 層。CD層應新增為別的媒體。"
 
 #: DB:medium_format/description:65
 msgctxt "medium_format"
 msgid ""
 "The DVD (audio) layer of a DualDisc. The CD layer should be added as a "
 "separate medium."
-msgstr "DualDisc的DVD（音訊）層。CD層應新增為別的媒體。"
+msgstr "DualDisc的DVD (音訊) 層。CD層應新增為別的媒體。"
 
 #: DB:medium_format/description:66
 msgctxt "medium_format"
 msgid ""
 "The DVD (video) layer of a DualDisc. The CD layer should be added as a "
 "separate medium."
-msgstr "DualDisc的DVD（視訊）層。CD層應新增為別的媒體。"
+msgstr "DualDisc的DVD (視訊) 層。CD層應新增為別的媒體。"
 
 #: DB:medium_format/description:80
 msgctxt "medium_format"
@@ -6237,14 +6485,14 @@ msgid ""
 "The madrigal is a type of secular vocal music composition. In its original "
 "form, it had no instrumental accompaniment, although accompaniment is much "
 "more common in later madrigals."
-msgstr ""
+msgstr "牧歌是一種世俗聲樂組合。 最初的形式沒有樂器伴奏，儘管在後來的牧歌中伴奏更為常見。"
 
 #: DB:work_type/description:24
 msgctxt "work_type"
 msgid ""
 "The operetta is a genre of light opera, in terms both of music and subject "
 "matter. Operettas are generally short and include spoken parts."
-msgstr ""
+msgstr "無論是音樂還是題材，輕歌劇都比歌劇輕。輕歌劇通常很短，並且包括口語部分。"
 
 #: DB:release_packaging/description:1
 msgctxt "release_packaging"
@@ -6264,7 +6512,7 @@ msgid ""
 "This represents literary works written in prose, that is, written in "
 "relatively ordinary language without metrical structure (e.g. novels, short "
 "stories, essays...)."
-msgstr ""
+msgstr "這代表以散文形式寫的文學作品，即以相對普通的語言書寫而沒有韻律結構(例如小說，短篇小說，短文…等)。"
 
 #: DB:work_attribute_type_allowed_value/value:1041
 msgctxt "work_attribute_type_allowed_value"
@@ -6319,7 +6567,7 @@ msgstr "音軌"
 #: DB:cover_art_archive.art_type/name:9
 msgctxt "cover_art_type"
 msgid "Tray"
-msgstr "盤子"
+msgstr "托盤"
 
 #: DB:work_attribute_type_allowed_value/value:1046
 msgctxt "work_attribute_type_allowed_value"
@@ -6634,7 +6882,7 @@ msgstr "作品名稱"
 #: DB:series_type/name:4
 msgctxt "series_type"
 msgid "Work series"
-msgstr ""
+msgstr "作品系列"
 
 #: DB:work_attribute_type_allowed_value/value:277
 msgctxt "work_attribute_type_allowed_value"
@@ -6695,7 +6943,7 @@ msgstr ""
 #: DB:work_type/name:19
 msgctxt "work_type"
 msgid "Zarzuela"
-msgstr ""
+msgstr "西班牙輕歌劇"
 
 #: DB:work_attribute_type_allowed_value/value:591
 msgctxt "work_attribute_type_allowed_value"
@@ -6827,7 +7075,7 @@ msgstr ""
 #: DB:work_type/name:20
 msgctxt "work_type"
 msgid "Étude"
-msgstr ""
+msgstr "練習曲"
 
 #: DB:work_attribute_type_allowed_value/value:653
 msgctxt "work_attribute_type_allowed_value"

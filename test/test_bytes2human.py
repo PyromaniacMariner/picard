@@ -1,7 +1,29 @@
+# -*- coding: utf-8 -*-
+#
+# Picard, the next-generation MusicBrainz tagger
+#
+# Copyright (C) 2013, 2019-2020 Laurent Monin
+# Copyright (C) 2014, 2017 Sophist-UK
+# Copyright (C) 2017 Sambhav Kothari
+# Copyright (C) 2018 Wieland Hoffmann
+# Copyright (C) 2018-2019 Philipp Wolfer
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 2
+# of the License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
+
+
 import os.path
-import shutil
-import sys
-import tempfile
 
 from test.picardtestcase import PicardTestCase
 
@@ -13,14 +35,8 @@ class Testbytes2human(PicardTestCase):
     def setUp(self):
         super().setUp()
         # we are using temporary locales for tests
-        self.tmp_path = tempfile.mkdtemp()
-        if sys.hexversion >= 0x020700F0:
-            self.addCleanup(shutil.rmtree, self.tmp_path)
+        self.tmp_path = self.mktmpdir()
         self.localedir = os.path.join(self.tmp_path, 'locale')
-
-    def tearDown(self):
-        if sys.hexversion < 0x020700F0:
-            shutil.rmtree(self.tmp_path)
 
     def test_00(self):
         # testing with default C locale, english
@@ -65,13 +81,13 @@ class Testbytes2human(PicardTestCase):
         if create_test_data:
             self._save_expected_to(filename, testlist)
         expected = self._read_expected_from(filename)
-        #self.maxDiff = None
         self.assertEqual(testlist, expected)
         if create_test_data:
             # be sure it is disabled
             self.fail('!!! UNSET create_test_data mode !!! (%s)' % filename)
 
-    def _create_testlist(self):
+    @staticmethod
+    def _create_testlist():
         values = [0, 1]
         for n in [1000, 1024]:
             p = 1
@@ -86,14 +102,16 @@ class Testbytes2human(PicardTestCase):
                                   bytes2human.short_string(x, 1024, 2)]))
         return list
 
-    def _save_expected_to(self, path, a_list):
+    @staticmethod
+    def _save_expected_to(path, a_list):
         with open(path, 'wb') as f:
-            f.writelines([l + "\n" for l in a_list])
+            f.writelines([line + "\n" for line in a_list])
             f.close()
 
-    def _read_expected_from(self, path):
+    @staticmethod
+    def _read_expected_from(path):
         with open(path, 'r') as f:
-            lines = [l.rstrip("\n") for l in f.readlines()]
+            lines = [line.rstrip("\n") for line in f.readlines()]
             f.close()
             return lines
 

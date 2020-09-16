@@ -3,15 +3,15 @@
 # reneweesp <bmom43@hotmail.com>, 2017
 # Maurits Meulenbelt <email address hidden>, 2012
 # Maurits Meulenbelt <mfmeulenbelt@gmail.com>, 2012
-# Maurits Meulenbelt <mfmeulenbelt@gmail.com>, 2013-2019
+# Maurits Meulenbelt <mfmeulenbelt@gmail.com>, 2013-2020
 # Nikolai Prokoschenko <email address hidden>, 2011
 # Nikolai Prokoschenko <nikolai@prokoschenko.de>, 2011
 # Niko Strijbol <strijbol.niko@gmail.com>, 2018
 msgid ""
 msgstr ""
 "Project-Id-Version: MusicBrainz\n"
-"PO-Revision-Date: 2019-10-28 15:05+0000\n"
-"Last-Translator: Maurits Meulenbelt <mfmeulenbelt@gmail.com>\n"
+"PO-Revision-Date: 2020-09-03 17:21+0000\n"
+"Last-Translator: Michael Wiencek <mwtuea@gmail.com>\n"
 "Language-Team: Dutch (http://www.transifex.com/musicbrainz/musicbrainz/language/nl/)\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
@@ -25,64 +25,64 @@ msgid ""
 "\"Motet\" is a term that applies to different types of (usually "
 "unaccompanied) choral works. What exactly is a motet depends quite a bit on "
 "the period."
-msgstr "\"Motet\" is een term die van toepassing is op verschillende soorten (meestal niet-begeleide) koorcomposities. Wat een motet precies is, hangt nogal af van de tijdsperiode."
+msgstr "Met motet worden verschillende soorten gezongen composities aangeduid. Meestal worden motetten niet door een instrument begeleid. Wat precies als een motet wordt beschouwd, hangt af van de periode."
 
 #: DB:work_type/description:5
 msgctxt "work_type"
 msgid ""
 "\"Sonata\" is a general term used to describe small scale (very often solo "
 "or solo + keyboard) instrumental works, initially in baroque music."
-msgstr "\"Sonate\" is een term die kleinschalige instrumentale composities (vaak voor een solo-instrument of een solo-instrument samen met piano) beschrijft. De sonate is ontstaan in de barok."
+msgstr "Sonate is een benaming die wordt gebruikt voor kleinschalige instrumentale composities (vaak voor een solo-instrument of een solo-instrument samen met piano). De sonate is ontstaan in de barok."
 
 #: DB:medium_format/name:54
 msgctxt "medium_format"
 msgid "10\" Shellac"
-msgstr "10″ schellak"
+msgstr "10″-schellak"
 
 #: DB:medium_format/name:30
 msgctxt "medium_format"
 msgid "10\" Vinyl"
-msgstr "10″ vinyl"
+msgstr "10″-vinyl"
 
 #: DB:medium_format/name:72
 msgctxt "medium_format"
 msgid "12\" LaserDisc"
-msgstr "12″ LaserDisc"
+msgstr "12″-LaserDisc"
 
 #: DB:medium_format/name:55
 msgctxt "medium_format"
 msgid "12\" Shellac"
-msgstr "12″ schellak"
+msgstr "12″-schellak"
 
 #: DB:medium_format/name:31
 msgctxt "medium_format"
 msgid "12\" Vinyl"
-msgstr "12″ vinyl"
+msgstr "12″-vinyl"
 
 #: DB:medium_format/name:49
 msgctxt "medium_format"
 msgid "3.5\" Floppy Disk"
-msgstr "3,5″ floppy"
+msgstr "3,5″-floppy"
 
 #: DB:medium_format/name:52
 msgctxt "medium_format"
 msgid "7\" Flexi-disc"
-msgstr "7″ flexi-disc"
+msgstr "7″-flexi-disc"
 
 #: DB:medium_format/name:56
 msgctxt "medium_format"
 msgid "7\" Shellac"
-msgstr "7″ schellak"
+msgstr "7″-schellak"
 
 #: DB:medium_format/name:29
 msgctxt "medium_format"
 msgid "7\" Vinyl"
-msgstr "7″ vinyl"
+msgstr "7″-vinyl"
 
 #: DB:medium_format/name:71
 msgctxt "medium_format"
 msgid "8\" LaserDisc"
-msgstr "8″ LaserDisc"
+msgstr "8″-LaserDisc"
 
 #: DB:medium_format/name:78
 msgctxt "medium_format"
@@ -92,12 +92,12 @@ msgstr "8-sporencassette"
 #: DB:medium_format/name:34
 msgctxt "medium_format"
 msgid "8cm CD"
-msgstr "8 cm cd"
+msgstr "8cm-cd"
 
 #: DB:medium_format/name:40
 msgctxt "medium_format"
 msgid "8cm CD+G"
-msgstr "8 cm cd+g"
+msgstr "8cm-cd+g"
 
 #: DB:medium_format/description:58
 msgctxt "medium_format"
@@ -408,15 +408,50 @@ msgctxt "work_attribute_type_allowed_value"
 msgid "A-sharp minor"
 msgstr "aïs kleine terts"
 
+#: DB:work_attribute_type/name:44
+msgctxt "work_attribute_type"
+msgid "ACAM ID"
+msgstr ""
+
+#: DB:work_attribute_type/name:47
+msgctxt "work_attribute_type"
+msgid "ACDAM ID"
+msgstr ""
+
+#: DB:work_attribute_type/name:43
+msgctxt "work_attribute_type"
+msgid "AGADU ID"
+msgstr ""
+
 #: DB:work_attribute_type/name:23
 msgctxt "work_attribute_type"
 msgid "AKM ID"
 msgstr "AKM-ID"
 
+#: DB:work_attribute_type/name:38
+msgctxt "work_attribute_type"
+msgid "AMRA ID"
+msgstr ""
+
+#: DB:work_attribute_type/name:46
+msgctxt "work_attribute_type"
+msgid "APA ID"
+msgstr ""
+
+#: DB:work_attribute_type/name:41
+msgctxt "work_attribute_type"
+msgid "APDAYC ID"
+msgstr ""
+
 #: DB:work_attribute_type/name:13
 msgctxt "work_attribute_type"
 msgid "APRA ID"
 msgstr "APRA-ID"
+
+#: DB:work_attribute_type/name:48
+msgctxt "work_attribute_type"
+msgid "ARTISJUS ID"
+msgstr ""
 
 #: DB:work_attribute_type/name:6
 msgctxt "work_attribute_type"
@@ -1382,6 +1417,11 @@ msgctxt "medium_format"
 msgid "CED"
 msgstr "CED"
 
+#: DB:work_attribute_type/name:45
+msgctxt "work_attribute_type"
+msgid "COMPASS ID"
+msgstr ""
+
 #: DB:work_attribute_type_allowed_value/value:63
 msgctxt "work_attribute_type_allowed_value"
 msgid "Cakravākaṁ"
@@ -2148,6 +2188,11 @@ msgctxt "work_attribute_type_allowed_value"
 msgid "E-sharp minor"
 msgstr "eïs kleine terts"
 
+#: DB:work_attribute_type/name:37
+msgctxt "work_attribute_type"
+msgid "ECAD ID"
+msgstr ""
+
 #: DB:release_group_primary_type/name:3
 msgctxt "release_group_primary_type"
 msgid "EP"
@@ -2421,7 +2466,7 @@ msgstr "Flexidiscs zijn grammofoonplaten die zijn gemaakt van een dun, flexibel 
 #: DB:medium_format/name:76
 msgctxt "medium_format"
 msgid "Floppy Disk"
-msgstr "Floppy"
+msgstr "floppy"
 
 #: DB:gender/description:4
 msgctxt "gender"
@@ -3065,15 +3110,106 @@ msgctxt "work_attribute_type"
 msgid "ICE ID"
 msgstr "ICE-ID"
 
+#: DB:work_attribute_type/description:34
+msgctxt "work_attribute_type"
+msgid "ID assigned to a work by the British rights society PRS for Music"
+msgstr ""
+
+#: DB:work_attribute_type/description:22
+msgctxt "work_attribute_type"
+msgid ""
+"ID for rights intermediaries Christian Copyright Licensing International"
+msgstr ""
+
+#: DB:work_attribute_type/description:24
+msgctxt "work_attribute_type"
+msgid "ID for the Argentinean rights society SADAIC"
+msgstr ""
+
+#: DB:work_attribute_type/description:13
+msgctxt "work_attribute_type"
+msgid "ID for the Australasian rights society APRA"
+msgstr ""
+
+#: DB:work_attribute_type/description:23
+msgctxt "work_attribute_type"
+msgid "ID for the Austrian rights society AKM"
+msgstr ""
+
 #: DB:work_attribute_type/description:28
 msgctxt "work_attribute_type"
 msgid "ID for the Belgian rights society SABAM"
 msgstr "Identificatiecode van de Belgische auteursrechtenorganisatie SABAM"
 
+#: DB:work_attribute_type/description:37
+msgctxt "work_attribute_type"
+msgid "ID for the Brazilian rights society ECAD"
+msgstr ""
+
+#: DB:work_attribute_type/description:10
+msgctxt "work_attribute_type"
+msgid "ID for the Canadian rights society SOCAN"
+msgstr ""
+
+#: DB:work_attribute_type/description:39
+msgctxt "work_attribute_type"
+msgid "ID for the Colombian rights society SAYCO"
+msgstr ""
+
+#: DB:work_attribute_type/description:44
+msgctxt "work_attribute_type"
+msgid "ID for the Costa Rican rights society ACAM"
+msgstr ""
+
+#: DB:work_attribute_type/description:47
+msgctxt "work_attribute_type"
+msgid "ID for the Cuban rights society ACDAM"
+msgstr ""
+
+#: DB:work_attribute_type/description:25
+msgctxt "work_attribute_type"
+msgid "ID for the Czech rights society OSA"
+msgstr ""
+
+#: DB:work_attribute_type/description:26
+msgctxt "work_attribute_type"
+msgid "ID for the Dutch rights society BUMA/STEMRA"
+msgstr ""
+
+#: DB:work_attribute_type/description:40
+msgctxt "work_attribute_type"
+msgid "ID for the Ecuadorian rights society SAYCE"
+msgstr ""
+
+#: DB:work_attribute_type/description:21
+msgctxt "work_attribute_type"
+msgid "ID for the French rights society Sacem"
+msgstr ""
+
+#: DB:work_attribute_type/description:9
+msgctxt "work_attribute_type"
+msgid "ID for the German rights society GEMA"
+msgstr ""
+
+#: DB:work_attribute_type/description:19
+msgctxt "work_attribute_type"
+msgid "ID for the Hong Kong rights society CASH"
+msgstr ""
+
+#: DB:work_attribute_type/description:48
+msgctxt "work_attribute_type"
+msgid "ID for the Hungarian rights society ARTISJUS"
+msgstr ""
+
 #: DB:work_attribute_type/description:29
 msgctxt "work_attribute_type"
 msgid "ID for the International Copyright Enterprise"
 msgstr "Identificatiecode van de International Copyright Enterprise"
+
+#: DB:work_attribute_type/description:36
+msgctxt "work_attribute_type"
+msgid "ID for the Italian rights society SIAE"
+msgstr ""
 
 #: DB:work_attribute_type/description:3
 msgctxt "work_attribute_type"
@@ -3085,15 +3221,90 @@ msgctxt "work_attribute_type"
 msgid "ID for the Japanese rights society NexTone"
 msgstr "Identificatiecode van de Japanse auteursrechtenorganisatie NexTone"
 
+#: DB:work_attribute_type/description:11
+msgctxt "work_attribute_type"
+msgid "ID for the Korean rights society KOMCA"
+msgstr ""
+
+#: DB:work_attribute_type/description:49
+msgctxt "work_attribute_type"
+msgid "ID for the Malaysian rights society MACP"
+msgstr ""
+
 #: DB:work_attribute_type/description:27
 msgctxt "work_attribute_type"
 msgid "ID for the Mexican rights society SACM"
 msgstr "Identificatiecode van de Mexicaanse auteursrechtenorganisatie SACM"
 
+#: DB:work_attribute_type/description:46
+msgctxt "work_attribute_type"
+msgid "ID for the Paraguayan rights society APA"
+msgstr ""
+
+#: DB:work_attribute_type/description:41
+msgctxt "work_attribute_type"
+msgid "ID for the Peruvian rights society APDAYC"
+msgstr ""
+
 #: DB:work_attribute_type/description:30
 msgctxt "work_attribute_type"
 msgid "ID for the Polish rights society ZAiKS"
 msgstr "Identificatiecode van de Poolse auteursrechtenorganisatie ZAiKS"
+
+#: DB:work_attribute_type/description:35
+msgctxt "work_attribute_type"
+msgid "ID for the Portuguese rights society SPA"
+msgstr ""
+
+#: DB:work_attribute_type/description:45
+msgctxt "work_attribute_type"
+msgid "ID for the Singaporean rights society COMPASS"
+msgstr ""
+
+#: DB:work_attribute_type/description:20
+msgctxt "work_attribute_type"
+msgid "ID for the Spanish rights society SGAE"
+msgstr ""
+
+#: DB:work_attribute_type/description:18
+msgctxt "work_attribute_type"
+msgid "ID for the Swiss rights society SUISA"
+msgstr ""
+
+#: DB:work_attribute_type/description:12
+msgctxt "work_attribute_type"
+msgid "ID for the Taiwanese rights society MÜST"
+msgstr ""
+
+#: DB:work_attribute_type/description:6
+msgctxt "work_attribute_type"
+msgid "ID for the US rights society ASCAP"
+msgstr ""
+
+#: DB:work_attribute_type/description:7
+msgctxt "work_attribute_type"
+msgid "ID for the US rights society BMI"
+msgstr ""
+
+#: DB:work_attribute_type/description:8
+msgctxt "work_attribute_type"
+msgid "ID for the US rights society SESAC"
+msgstr ""
+
+#: DB:work_attribute_type/description:43
+msgctxt "work_attribute_type"
+msgid "ID for the Uruguayan rights society AGADU"
+msgstr ""
+
+#: DB:work_attribute_type/description:42
+msgctxt "work_attribute_type"
+msgid "ID for the Venezuelan rights society SACVEN"
+msgstr ""
+
+#: DB:work_attribute_type/description:38
+msgctxt "work_attribute_type"
+msgid "ID for the international (formerly US) rights society AMRA"
+msgstr ""
 
 #: DB:work_attribute_type/name:14
 msgctxt "work_attribute_type"
@@ -3203,7 +3414,7 @@ msgid ""
 "Island is used for islands and atolls which don't form subdivisions of their"
 " own, e.g. Skye. These are not considered when displaying the parent areas "
 "for a given area."
-msgstr "Eiland wordt gebruikt voor eilanden en atollen die geen eigen subdivisie vormen, zoals het Britse eiland Skye. Eilanden worden niet getoond als bovenliggende gebieden van andere gebieden."
+msgstr "Eiland wordt gebruikt voor eilanden en atollen die geen eigen onderafdeling vormen, zoals het Britse eiland Skye. Eilanden worden niet getoond als bovenliggende gebieden van andere gebieden."
 
 #: DB:work_attribute_type/name:3
 msgctxt "work_attribute_type"
@@ -3843,6 +4054,11 @@ msgstr "Live"
 msgctxt "work_attribute_type_allowed_value"
 msgid "Longa"
 msgstr "Longa"
+
+#: DB:work_attribute_type/name:49
+msgctxt "work_attribute_type"
+msgid "MACP ID"
+msgstr ""
 
 #: DB:work_attribute_type_allowed_value/value:963
 msgctxt "work_attribute_type_allowed_value"
@@ -4859,6 +5075,11 @@ msgctxt "work_attribute_type_allowed_value"
 msgid "Oyunhavası"
 msgstr "Oyunhavası"
 
+#: DB:work_attribute_type/name:34
+msgctxt "work_attribute_type"
+msgid "PRS tune code"
+msgstr ""
+
 #: DB:work_attribute_type_allowed_value/value:993
 msgctxt "work_attribute_type_allowed_value"
 msgid "Pahāḍi"
@@ -5457,10 +5678,25 @@ msgctxt "work_attribute_type"
 msgid "SACM ID"
 msgstr "SACM-ID"
 
+#: DB:work_attribute_type/name:42
+msgctxt "work_attribute_type"
+msgid "SACVEN ID"
+msgstr ""
+
 #: DB:work_attribute_type/name:24
 msgctxt "work_attribute_type"
 msgid "SADAIC ID"
 msgstr "SADAIC-ID"
+
+#: DB:work_attribute_type/name:40
+msgctxt "work_attribute_type"
+msgid "SAYCE ID"
+msgstr ""
+
+#: DB:work_attribute_type/name:39
+msgctxt "work_attribute_type"
+msgid "SAYCO ID"
+msgstr ""
 
 #: DB:medium_format/name:62
 msgctxt "medium_format"
@@ -5487,10 +5723,20 @@ msgctxt "medium_format"
 msgid "SHM-SACD"
 msgstr "SHM-sacd"
 
+#: DB:work_attribute_type/name:36
+msgctxt "work_attribute_type"
+msgid "SIAE ID"
+msgstr ""
+
 #: DB:work_attribute_type/name:10
 msgctxt "work_attribute_type"
 msgid "SOCAN ID"
 msgstr "SOCAN-ID"
+
+#: DB:work_attribute_type/name:35
+msgctxt "work_attribute_type"
+msgid "SPA ID"
+msgstr ""
 
 #: DB:work_attribute_type/name:18
 msgctxt "work_attribute_type"
@@ -5703,7 +5949,7 @@ msgctxt "medium_format"
 msgid ""
 "Shellac records were the most predominant type of gramophone record during "
 "the first half of the 20th century."
-msgstr "De schellakplaat was het meest voorkomende type grammofoonplaat tijdens de eerste helft van de twintigste eeuw."
+msgstr "De schellakplaat was tijdens de eerste helft van de twintigste eeuw het meest voorkomende type grammofoonplaat."
 
 #: DB:work_attribute_type_allowed_value/value:236
 msgctxt "work_attribute_type_allowed_value"

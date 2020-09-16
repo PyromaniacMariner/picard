@@ -1,7 +1,11 @@
 # -*- coding: utf-8 -*-
 #
 # Picard, the next-generation MusicBrainz tagger
+#
 # Copyright (C) 2008 Lukáš Lalinský
+# Copyright (C) 2018 Philipp Wolfer
+# Copyright (C) 2019 Laurent Monin
+# Copyright (C) 2019 Wieland Hoffmann
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -16,6 +20,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
+
 
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import (
@@ -76,6 +81,7 @@ class GenresOptionsPage(OptionsPage):
     PARENT = "metadata"
     SORT_ORDER = 20
     ACTIVE = True
+    HELP_URL = '/config/options_genres.html'
 
     options = [
         config.BoolOption("setting", "use_genres", False),
@@ -99,7 +105,7 @@ class GenresOptionsPage(OptionsPage):
         self.ui.test_genres_filter.setToolTip(_(TOOLTIP_TEST_GENRES_FILTER))
         self.ui.test_genres_filter.textChanged.connect(self.update_test_genres_filter)
 
-        #FIXME: colors aren't great from accessibility POV
+        # FIXME: colors aren't great from accessibility POV
         self.fmt_keep = QTextBlockFormat()
         self.fmt_keep.setBackground(Qt.green)
 
@@ -135,7 +141,7 @@ class GenresOptionsPage(OptionsPage):
         filters = self.ui.genres_filter.toPlainText()
         tagfilter = TagGenreFilter(filters)
 
-        #FIXME: very simple error reporting, improve
+        # FIXME: very simple error reporting, improve
         self.ui.label_test_genres_filter_error.setText(
             "\n".join(
                 [_("Error line %d: %s") % (lineno + 1, error) for lineno, error in tagfilter.errors.items()]
@@ -145,7 +151,7 @@ class GenresOptionsPage(OptionsPage):
         def set_line_fmt(lineno, textformat):
             obj = self.ui.test_genres_filter
             if lineno < 0:
-                #use current cursor position
+                # use current cursor position
                 cursor = obj.textCursor()
             else:
                 cursor = QTextCursor(obj.document().findBlockByNumber(lineno))

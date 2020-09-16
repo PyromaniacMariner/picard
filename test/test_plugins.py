@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 #
 # Picard, the next-generation MusicBrainz tagger
-# Copyright (C) 2019 Laurent Monin
+#
+# Copyright (C) 2019-2020 Laurent Monin
+# Copyright (C) 2019-2020 Philipp Wolfer
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -17,28 +19,29 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 
+
 import logging
 import os
-import shutil
 import sys
-from tempfile import mkdtemp
 import unittest
 
 from test.picardtestcase import PicardTestCase
 
 import picard
-from picard import (
-    VersionError,
-    version_from_string,
-)
+from picard.const import USER_PLUGIN_DIR
 from picard.plugin import (
     _PLUGIN_MODULE_PREFIX,
+    PluginWrapper,
     _unregister_module_extensions,
 )
 from picard.pluginmanager import (
     PluginManager,
     _compatible_api_versions,
     _plugin_name_from_path,
+)
+from picard.version import (
+    Version,
+    VersionError,
 )
 
 
@@ -108,11 +111,7 @@ class TestPicardPluginsCommonTmpDir(TestPicardPluginsCommon):
 
     def setUp(self):
         super().setUp()
-        self.tmp_directory = mkdtemp()
-
-    def tearDown(self):
-        super().tearDown()
-        shutil.rmtree(self.tmp_directory)
+        self.tmp_directory = self.mktmpdir()
 
 
 class TestPicardPluginManager(TestPicardPluginsCommon):
@@ -121,11 +120,11 @@ class TestPicardPluginManager(TestPicardPluginsCommon):
 
         # use first element from picard.api_versions, it should be compatible
         api_versions = picard.api_versions[:1]
-        expected = set([version_from_string(v) for v in api_versions])
+        expected = set([Version.from_string(v) for v in api_versions])
         result = _compatible_api_versions(api_versions)
         self.assertEqual(result, expected)
 
-        # pretty sure 0.0 isn't compatible
+        # pretty sure 0.0 isn't compatible
         api_versions = ["0.0"]
         expected = set()
         result = _compatible_api_versions(api_versions)
@@ -160,7 +159,7 @@ class TestPicardPluginsInstall(TestPicardPluginsCommonTmpDir):
         self.assertEqual(pm.plugins[0].name, 'Dummy plugin', msg)
 
         # if module is properly loaded, this should work
-        from picard.plugins.dummyplugin import DummyPlugin
+        from picard.plugins.dummyplugin import DummyPlugin  # noqa: F811
         DummyPlugin()
 
     def _test_plugin_install_data(self, name):
@@ -180,7 +179,7 @@ class TestPicardPluginsInstall(TestPicardPluginsCommonTmpDir):
         self.assertEqual(pm.plugins[0].name, 'Dummy plugin', msg)
 
         # if module is properly loaded, this should work
-        from picard.plugins.dummyplugin import DummyPlugin
+        from picard.plugins.dummyplugin import DummyPlugin  # noqa: F811
         DummyPlugin()
 
     # module
@@ -236,7 +235,7 @@ class TestPicardPluginsLoad(TestPicardPluginsCommonTmpDir):
         self.assertEqual(pm.plugins[0].name, 'Dummy plugin', msg)
 
         # if module is properly loaded, this should work
-        from picard.plugins.dummyplugin import DummyPlugin
+        from picard.plugins.dummyplugin import DummyPlugin  # noqa: F811
         DummyPlugin()
 
     # singlefile
@@ -254,3 +253,15 @@ class TestPicardPluginsLoad(TestPicardPluginsCommonTmpDir):
     # module
     def test_plugin_load_from_directory_module(self):
         self._test_plugin_load_from_directory('module')
+
+
+class TestPluginWrapper(PicardTestCase):
+
+    def test_is_user_installed(self):
+        manifest = {
+            'PLUGIN_NAME': 'foo'
+        }
+        user_plugin = PluginWrapper({}, USER_PLUGIN_DIR, manifest_data=manifest)
+        self.assertTrue(user_plugin.is_user_installed)
+        system_plugin = PluginWrapper({}, '/other/path/plugins', manifest_data=manifest)
+        self.assertFalse(system_plugin.is_user_installed)

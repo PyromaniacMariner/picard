@@ -1,9 +1,12 @@
 # -*- coding: utf-8 -*-
 #
 # Picard, the next-generation MusicBrainz tagger
+#
 # Copyright (C) 2007 Lukáš Lalinský
 # Copyright (C) 2014 Shadab Zafar
 # Copyright (C) 2015-2019 Laurent Monin
+# Copyright (C) 2019 Wieland Hoffmann
+# Copyright (C) 2019-2020 Philipp Wolfer
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -19,6 +22,7 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 
+
 from functools import partial
 import imp
 import importlib
@@ -31,12 +35,7 @@ import zipimport
 
 from PyQt5 import QtCore
 
-from picard import (
-    VersionError,
-    log,
-    version_from_string,
-    version_to_string,
-)
+from picard import log
 from picard.const import (
     PLUGINS_API,
     USER_PLUGIN_DIR,
@@ -48,6 +47,10 @@ from picard.plugin import (
     _unregister_module_extensions,
 )
 import picard.plugins
+from picard.version import (
+    Version,
+    VersionError,
+)
 
 
 _SUFFIXES = tuple(importlib.machinery.all_suffixes())
@@ -145,7 +148,7 @@ def zip_import(path):
 
 
 def _compatible_api_versions(api_versions):
-    versions = [version_from_string(v) for v in list(api_versions)]
+    versions = [Version.from_string(v) for v in list(api_versions)]
     return set(versions) & set(picard.api_versions_tuple)
 
 
@@ -205,7 +208,7 @@ class PluginManager(QtCore.QObject):
             return
         if plugindir == self.plugins_directory:
             # .update trick is only for plugins installed through the Picard UI
-            # and only for plugins in plugins_directory (USER_PLUGIN_DIR by default)
+            # and only for plugins in plugins_directory (USER_PLUGIN_DIR by default)
             self.handle_plugin_updates()
         # now load found plugins
         names = set()
@@ -272,7 +275,7 @@ class PluginManager(QtCore.QObject):
                 log.debug("Loading plugin %r version %s, compatible with API: %s",
                           plugin.name,
                           plugin.version,
-                          ", ".join([version_to_string(v, short=True) for v in
+                          ", ".join([v.to_string(short=True) for v in
                                      sorted(compatible_versions)]))
                 plugin.compatible = True
                 setattr(picard.plugins, name, plugin_module)

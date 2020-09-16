@@ -1,7 +1,27 @@
 # -*- coding: utf-8 -*-
 #
 # Picard, the next-generation MusicBrainz tagger
-# Copyright (C) 2006 Lukáš Lalinský
+#
+# Copyright (C) 2006-2008, 2011-2012 Lukáš Lalinský
+# Copyright (C) 2007 Robert Kaye
+# Copyright (C) 2008 Gary van der Merwe
+# Copyright (C) 2008 Hendrik van Antwerpen
+# Copyright (C) 2008-2011, 2014-2015, 2018-2020 Philipp Wolfer
+# Copyright (C) 2009 Carlin Mangar
+# Copyright (C) 2009 Nikolai Prokoschenko
+# Copyright (C) 2011 Tim Blechmann
+# Copyright (C) 2011-2012 Chad Wilson
+# Copyright (C) 2011-2013 Michael Wiencek
+# Copyright (C) 2012 Your Name
+# Copyright (C) 2012-2013 Wieland Hoffmann
+# Copyright (C) 2013-2014, 2016, 2018-2019 Laurent Monin
+# Copyright (C) 2013-2014, 2017 Sophist-UK
+# Copyright (C) 2016 Rahul Raturi
+# Copyright (C) 2016 Simon Legner
+# Copyright (C) 2016 Suhas
+# Copyright (C) 2016-2017 Sambhav Kothari
+# Copyright (C) 2018 Vishal Choudhary
+# Copyright (C) 2020 Gabriel Ferreira
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -16,6 +36,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
+
 
 from collections import defaultdict
 from functools import partial
@@ -52,7 +73,6 @@ from picard.track import (
     Track,
 )
 from picard.util import (
-    encode_filename,
     icontheme,
     natsort,
     restore_method,
@@ -62,6 +82,13 @@ from picard.ui.collectionmenu import CollectionMenu
 from picard.ui.colors import interface_colors
 from picard.ui.ratingwidget import RatingWidget
 from picard.ui.scriptsmenu import ScriptsMenu
+from picard.ui.widgets.tristatesortheaderview import TristateSortHeaderView
+
+
+COLUMN_ICON_SIZE = 16
+COLUMN_ICON_BORDER = 2
+ICON_SIZE = QtCore.QSize(COLUMN_ICON_SIZE+COLUMN_ICON_BORDER,
+                         COLUMN_ICON_SIZE+COLUMN_ICON_BORDER)
 
 
 class BaseAction(QtWidgets.QAction):
@@ -126,17 +153,52 @@ class MainPanel(QtWidgets.QSplitter):
         (N_('Title'), 'title'),
         (N_('Length'), '~length'),
         (N_('Artist'), 'artist'),
+        (N_('Album Artist'), 'albumartist'),
+        (N_('Composer'), 'composer'),
+        (N_('Album'), 'album'),
+        (N_('Disc Subtitle'), 'discsubtitle'),
+        (N_('Track No.'), 'tracknumber'),
+        (N_('Disc No.'), 'discnumber'),
+        (N_('Catalog No.'), 'catalognumber'),
+        (N_('Barcode'), 'barcode'),
+        (N_('Media'), 'media'),
+        (N_('Genre'), 'genre'),
+        (N_('Fingerprint status'), '~fingerprint'),
+    ]
+
+    _column_indexes = {column[1]: i for i, column in enumerate(columns)}
+
+    TITLE_COLUMN = _column_indexes['title']
+    TRACKNUMBER_COLUMN = _column_indexes['tracknumber']
+    DISCNUMBER_COLUMN = _column_indexes['discnumber']
+    LENGTH_COLUMN = _column_indexes['~length']
+    FINGERPRINT_COLUMN = _column_indexes['~fingerprint']
+
+    NAT_SORT_COLUMNS = [
+        _column_indexes['title'],
+        _column_indexes['album'],
+        _column_indexes['discsubtitle'],
+        _column_indexes['tracknumber'],
+        _column_indexes['discnumber'],
+        _column_indexes['catalognumber'],
     ]
 
     def __init__(self, window, parent=None):
         super().__init__(parent)
         self.window = window
         self.create_icons()
-        self.views = [FileTreeView(window, self), AlbumTreeView(window, self)]
-        self.views[0].itemSelectionChanged.connect(self.update_selection_0)
-        self.views[1].itemSelectionChanged.connect(self.update_selection_1)
-        self._selected_view = 0
+        self._views = [FileTreeView(window, self), AlbumTreeView(window, self)]
+        self._selected_view = self._views[0]
         self._ignore_selection_changes = False
+
+        def _view_update_selection(view):
+            if not self._ignore_selection_changes:
+                self._ignore_selection_changes = True
+                self._update_selection(view)
+                self._ignore_selection_changes = False
+
+        for view in self._views:
+            view.itemSelectionChanged.connect(partial(_view_update_selection, view))
 
         TreeItem.window = window
         TreeItem.base_color = self.palette().base().color()
@@ -156,9 +218,19 @@ class MainPanel(QtWidgets.QSplitter):
             File.ERROR: interface_colors.get_qcolor('entity_error'),
         })
 
+    def set_processing(self, processing=True):
+        self._ignore_selection_changes = processing
+
+    def tab_order(self, tab_order, before, after):
+        prev = before
+        for view in self._views:
+            tab_order(prev, view)
+            prev = view
+        tab_order(prev, after)
+
     def save_state(self):
         config.persist["splitter_state"] = self.saveState()
-        for view in self.views:
+        for view in self._views:
             view.save_state()
 
     @restore_method
@@ -184,6 +256,8 @@ class MainPanel(QtWidgets.QSplitter):
         FileItem.icon_file_pending = QtGui.QIcon(":/images/file-pending.png")
         FileItem.icon_error = icontheme.lookup('dialog-error', icontheme.ICON_SIZE_MENU)
         FileItem.icon_saved = QtGui.QIcon(":/images/track-saved.png")
+        FileItem.icon_fingerprint = icontheme.lookup('fingerprint', icontheme.ICON_SIZE_MENU)
+        FileItem.icon_fingerprint_gray = icontheme.lookup('fingerprint-gray', icontheme.ICON_SIZE_MENU)
         FileItem.match_icons = [
             QtGui.QIcon(":/images/match-50.png"),
             QtGui.QIcon(":/images/match-60.png"),
@@ -210,33 +284,23 @@ class MainPanel(QtWidgets.QSplitter):
         ]
         self.icon_plugins = icontheme.lookup('applications-system', icontheme.ICON_SIZE_MENU)
 
-    def update_selection(self, i, j):
-        self._selected_view = i
-        self.views[j].clearSelection()
-        self.window.update_selection(
-            [item.obj for item in self.views[i].selectedItems()])
-
-    def update_selection_0(self):
-        if not self._ignore_selection_changes:
-            self._ignore_selection_changes = True
-            self.update_selection(0, 1)
-            self._ignore_selection_changes = False
-
-    def update_selection_1(self):
-        if not self._ignore_selection_changes:
-            self._ignore_selection_changes = True
-            self.update_selection(1, 0)
-            self._ignore_selection_changes = False
+    def _update_selection(self, selected_view):
+        for view in self._views:
+            if view != selected_view:
+                view.clearSelection()
+            else:
+                self._selected_view = view
+                self.window.update_selection([item.obj for item in view.selectedItems()])
 
     def update_current_view(self):
-        self.update_selection(self._selected_view, abs(self._selected_view - 1))
+        self._update_selection(self._selected_view)
 
     def remove(self, objects):
         self._ignore_selection_changes = True
         self.tagger.remove(objects)
         self._ignore_selection_changes = False
 
-        view = self.views[self._selected_view]
+        view = self._selected_view
         index = view.currentIndex()
         if index.isValid():
             # select the current index
@@ -244,16 +308,137 @@ class MainPanel(QtWidgets.QSplitter):
         else:
             self.update_current_view()
 
+    def set_sorting(self, sort=True):
+        for view in self._views:
+            view.setSortingEnabled(sort)
+
+    def collapse_clusters(self, collapse=True):
+        if collapse:
+            self._views[0].collapseAll()
+        else:
+            self._views[0].expandAll()
+
+
+def paint_fingerprint_icon(painter, rect, icon):
+    if not icon:
+        return
+    size = COLUMN_ICON_SIZE
+    padding_h = (rect.width() - size) / 2
+    padding_v = (rect.height() - size) / 2
+    target_rect = QtCore.QRect(rect.x() + padding_h, rect.y() + padding_v, size, size)
+    painter.drawPixmap(target_rect, icon.pixmap(size, size))
+
+
+class FingerprintColumnWidget(QtWidgets.QWidget):
+    def __init__(self, file, parent=None):
+        super().__init__(parent=parent)
+        self._file = file
+
+    def paintEvent(self, event=None):
+        painter = QtGui.QPainter(self)
+        paint_fingerprint_icon(painter, self.rect(), self.decide_icon())
+
+    def decide_icon(self):
+        if getattr(self._file, 'acoustid_fingerprint', None):
+            if self.tagger.acoustidmanager.is_submitted(self._file):
+                return FileItem.icon_fingerprint_gray
+            else:
+                return FileItem.icon_fingerprint
+        else:
+            return None
+
+
+class ConfigurableColumnsHeader(TristateSortHeaderView):
+
+    def __init__(self, parent=None):
+        super().__init__(QtCore.Qt.Horizontal, parent)
+        self._visible_columns = set([0])
+
+        # The following are settings applied to default headers
+        # of QTreeView and QTreeWidget.
+        self.setSectionsMovable(True)
+        self.setStretchLastSection(True)
+        self.setDefaultAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter)
+        self.setSectionsClickable(False)
+        self.sortIndicatorChanged.connect(self.on_sort_indicator_changed)
+
+        # enable sorting, but don't actually use it by default
+        # XXX it would be nice to be able to go to the 'no sort' mode, but the
+        #     internal model that QTreeWidget uses doesn't support it
+        self.setSortIndicator(-1, QtCore.Qt.AscendingOrder)
+        self.setDefaultSectionSize(100)
+
+    def show_column(self, column, show):
+        if column == 0:  # The first column is fixed
+            return
+        self.parent().setColumnHidden(column, not show)
+        if show:
+            if self.sectionSize(column) == 0:
+                self.resizeSection(column, self.defaultSectionSize())
+            self._visible_columns.add(column)
+            if column == MainPanel.FINGERPRINT_COLUMN:
+                self.setSectionResizeMode(column, QtWidgets.QHeaderView.Fixed)
+                self.parent().resizeColumnToContents(column)
+            else:
+                self.setSectionResizeMode(column, QtWidgets.QHeaderView.Interactive)
+        elif column in self._visible_columns:
+            self._visible_columns.remove(column)
+
+    def update_visible_columns(self, columns):
+        for i, column in enumerate(MainPanel.columns):
+            self.show_column(i, i in columns)
+
+    @property
+    def visible_columns(self):
+        return self._visible_columns
+
+    def contextMenuEvent(self, event):
+        menu = QtWidgets.QMenu(self)
+
+        for i, column in enumerate(MainPanel.columns):
+            if i == 0:
+                continue
+            action = QtWidgets.QAction(_(column[0]), self.parent())
+            action.setCheckable(True)
+            action.setChecked(i in self._visible_columns)
+            action.triggered.connect(partial(self.show_column, i))
+            menu.addAction(action)
+
+        menu.addSeparator()
+        restore_action = QtWidgets.QAction(_('Restore default columns'), self.parent())
+        restore_action.triggered.connect(self.restore_defaults)
+        menu.addAction(restore_action)
+
+        menu.exec_(event.globalPos())
+        event.accept()
+
+    def restore_defaults(self):
+        self.parent().restore_default_columns()
+
+    def paintSection(self, painter, rect, index):
+        if index == MainPanel.FINGERPRINT_COLUMN:
+            painter.save()
+            super().paintSection(painter, rect, index)
+            painter.restore()
+            paint_fingerprint_icon(painter, rect, FileItem.icon_fingerprint_gray)
+        else:
+            super().paintSection(painter, rect, index)
+
+    def on_sort_indicator_changed(self, index, order):
+        if index == MainPanel.FINGERPRINT_COLUMN:
+            self.setSortIndicator(-1, QtCore.Qt.AscendingOrder)
+
 
 class BaseTreeView(QtWidgets.QTreeWidget):
 
     def __init__(self, window, parent=None):
         super().__init__(parent)
+        self.setHeader(ConfigurableColumnsHeader(self))
         self.window = window
         self.panel = parent
 
-        self.numHeaderSections = len(MainPanel.columns)
-        self.setHeaderLabels([_(h) for h, n in MainPanel.columns])
+        self.setHeaderLabels([_(h) if n != '~fingerprint' else ''
+                              for h, n in MainPanel.columns])
         self.restore_state()
 
         self.setAcceptDrops(True)
@@ -261,10 +446,6 @@ class BaseTreeView(QtWidgets.QTreeWidget):
         self.setDropIndicatorShown(True)
         self.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
 
-        # enable sorting, but don't actually use it by default
-        # XXX it would be nice to be able to go to the 'no sort' mode, but the
-        #     internal model that QTreeWidget uses doesn't support it
-        self.header().setSortIndicator(-1, QtCore.Qt.AscendingOrder)
         self.setSortingEnabled(True)
 
         self.expand_all_action = QtWidgets.QAction(_("&Expand all"), self)
@@ -275,6 +456,7 @@ class BaseTreeView(QtWidgets.QTreeWidget):
         self.select_all_action.triggered.connect(self.selectAll)
         self.select_all_action.setShortcut(QtGui.QKeySequence(_("Ctrl+A")))
         self.doubleClicked.connect(self.activate_item)
+        self.setUniformRowHeights(True)
 
     def contextMenuEvent(self, event):
         item = self.itemAt(event.pos())
@@ -295,6 +477,8 @@ class BaseTreeView(QtWidgets.QTreeWidget):
                 menu.addAction(self.window.track_search_action)
                 plugin_actions.extend(_file_actions)
             menu.addAction(self.window.browser_lookup_action)
+            if obj.num_linked_files > 0:
+                menu.addAction(self.window.generate_fingerprints_action)
             menu.addSeparator()
             if isinstance(obj, NonAlbumTrack):
                 menu.addAction(self.window.refresh_action)
@@ -309,10 +493,12 @@ class BaseTreeView(QtWidgets.QTreeWidget):
                 menu.addAction(self.window.cluster_action)
             else:
                 menu.addAction(self.window.album_search_action)
+            menu.addAction(self.window.generate_fingerprints_action)
             plugin_actions = list(_cluster_actions)
         elif isinstance(obj, ClusterList):
             menu.addAction(self.window.autotag_action)
             menu.addAction(self.window.analyze_action)
+            menu.addAction(self.window.generate_fingerprints_action)
             plugin_actions = list(_clusterlist_actions)
         elif isinstance(obj, File):
             if can_view_info:
@@ -324,11 +510,14 @@ class BaseTreeView(QtWidgets.QTreeWidget):
             menu.addAction(self.window.autotag_action)
             menu.addAction(self.window.analyze_action)
             menu.addAction(self.window.track_search_action)
+            menu.addAction(self.window.generate_fingerprints_action)
             plugin_actions = list(_file_actions)
         elif isinstance(obj, Album):
             if can_view_info:
                 menu.addAction(self.window.view_info_action)
             menu.addAction(self.window.browser_lookup_action)
+            if obj.get_num_total_files() > 0:
+                menu.addAction(self.window.generate_fingerprints_action)
             menu.addSeparator()
             menu.addAction(self.window.refresh_action)
             plugin_actions = list(_album_actions)
@@ -346,7 +535,7 @@ class BaseTreeView(QtWidgets.QTreeWidget):
             loading.setDisabled(True)
             bottom_separator = True
 
-            if len(self.selectedIndexes()) == len(MainPanel.columns):
+            if len(self.selectedItems()) == 1:
                 def _add_other_versions():
                     releases_menu.removeAction(loading)
                     heading = releases_menu.addAction(obj.release_group.version_headings)
@@ -412,7 +601,7 @@ class BaseTreeView(QtWidgets.QTreeWidget):
             menu.addSeparator()
 
         # Using type here is intentional. isinstance will return true for the
-        # NatAlbum instance, which can't be part of a collection.
+        # NatAlbum instance, which can't be part of a collection.
         # pylint: disable=C0123
         selected_albums = [a for a in self.window.selected_objects if type(a) == Album]
         if selected_albums:
@@ -457,19 +646,25 @@ class BaseTreeView(QtWidgets.QTreeWidget):
 
     @restore_method
     def restore_state(self):
-        sizes = config.persist[self.view_sizes.name]
-        header = self.header()
-        sizes = sizes.split(" ")
-        try:
-            for i in range(self.numHeaderSections - 1):
-                header.resizeSection(i, int(sizes[i]))
-        except IndexError:
-            pass
+        self._restore_state(config.persist[self.header_state.name])
 
     def save_state(self):
-        cols = range(self.numHeaderSections - 1)
-        sizes = " ".join(str(self.header().sectionSize(i)) for i in cols)
-        config.persist[self.view_sizes.name] = sizes
+        config.persist[self.header_state.name] = self.header().saveState()
+
+    def restore_default_columns(self):
+        self._restore_state(None)
+
+    def _restore_state(self, header_state):
+        header = self.header()
+        if header_state:
+            header.restoreState(header_state)
+            for i in range(0, self.columnCount()):
+                header.show_column(i, not self.isColumnHidden(i))
+        else:
+            header.update_visible_columns([0, 1, 2])
+            for i, size in enumerate([250, 50, 100]):
+                header.resizeSection(i, size)
+            self.sortByColumn(-1, QtCore.Qt.AscendingOrder)
 
     def supportedDropActions(self):
         return QtCore.Qt.CopyAction | QtCore.Qt.MoveAction
@@ -526,18 +721,17 @@ class BaseTreeView(QtWidgets.QTreeWidget):
     @staticmethod
     def drop_urls(urls, target):
         files = []
-        new_files = []
+        new_paths = []
+        tagger = QtCore.QObject.tagger
         for url in urls:
             log.debug("Dropped the URL: %r", url.toString(QtCore.QUrl.RemoveUserInfo))
             if url.scheme() == "file" or not url.scheme():
                 filename = os.path.normpath(os.path.realpath(url.toLocalFile().rstrip("\0")))
-                file = BaseTreeView.tagger.files.get(filename)
+                file = tagger.files.get(filename)
                 if file:
                     files.append(file)
-                elif os.path.isdir(encode_filename(filename)):
-                    BaseTreeView.tagger.add_directory(filename)
                 else:
-                    new_files.append(filename)
+                    new_paths.append(filename)
             elif url.scheme() in ("http", "https"):
                 path = url.path()
                 match = re.search(r"/(release|recording)/([0-9a-z\-]{36})", path)
@@ -545,13 +739,13 @@ class BaseTreeView(QtWidgets.QTreeWidget):
                     entity = match.group(1)
                     mbid = match.group(2)
                     if entity == "release":
-                        BaseTreeView.tagger.load_album(mbid)
+                        tagger.load_album(mbid)
                     elif entity == "recording":
-                        BaseTreeView.tagger.load_nat(mbid)
+                        tagger.load_nat(mbid)
         if files:
-            BaseTreeView.tagger.move_files(files, target)
-        if new_files:
-            BaseTreeView.tagger.add_files(new_files, target=target)
+            tagger.move_files(files, target)
+        if new_paths:
+            tagger.add_paths(new_paths, target=target)
 
     def dropEvent(self, event):
         return QtWidgets.QTreeView.dropEvent(self, event)
@@ -572,13 +766,16 @@ class BaseTreeView(QtWidgets.QTreeWidget):
         # text/uri-list
         urls = data.urls()
         if urls:
-            self.drop_urls(urls, target)
+            # Use QTimer.singleShot to run expensive processing outside of the drop handler.
+            QtCore.QTimer.singleShot(0, partial(self.drop_urls, urls, target))
             handled = True
         # application/picard.album-list
         albums = data.data("application/picard.album-list")
         if albums:
             albums = [self.tagger.load_album(id) for id in bytes(albums).decode().split("\n")]
-            self.tagger.move_files(self.tagger.get_files_from_objects(albums), target)
+            # Use QTimer.singleShot to run expensive processing outside of the drop handler.
+            QtCore.QTimer.singleShot(0, partial(self.tagger.move_files,
+                self.tagger.get_files_from_objects(albums), target))
             handled = True
         return handled
 
@@ -609,7 +806,7 @@ class BaseTreeView(QtWidgets.QTreeWidget):
 
 class FileTreeView(BaseTreeView):
 
-    view_sizes = config.TextOption("persist", "file_view_sizes", "250 40 100")
+    header_state = config.Option("persist", "file_view_header_state", QtCore.QByteArray())
 
     def __init__(self, window, parent=None):
         super().__init__(window, parent)
@@ -634,12 +831,12 @@ class FileTreeView(BaseTreeView):
         self.set_clusters_text()
 
     def set_clusters_text(self):
-        self.clusters.setText(0, '%s (%d)' % (_("Clusters"), len(self.tagger.clusters)))
+        self.clusters.setText(MainPanel.TITLE_COLUMN, '%s (%d)' % (_("Clusters"), len(self.tagger.clusters)))
 
 
 class AlbumTreeView(BaseTreeView):
 
-    view_sizes = config.TextOption("persist", "album_view_sizes", "250 40 100")
+    header_state = config.Option("persist", "album_view_header_state", QtCore.QByteArray())
 
     def __init__(self, window, parent=None):
         super().__init__(window, parent)
@@ -649,8 +846,12 @@ class AlbumTreeView(BaseTreeView):
         self.tagger.album_removed.connect(self.remove_album)
 
     def add_album(self, album):
-        item = AlbumItem(album, True, self)
-        item.setIcon(0, AlbumItem.icon_cd)
+        if isinstance(album, NatAlbum):
+            item = NatAlbumItem(album, True)
+            self.insertTopLevelItem(0, item)
+        else:
+            item = AlbumItem(album, True, self)
+        item.setIcon(MainPanel.TITLE_COLUMN, AlbumItem.icon_cd)
         for i, column in enumerate(MainPanel.columns):
             font = item.font(i)
             font.setBold(True)
@@ -671,7 +872,18 @@ class TreeItem(QtWidgets.QTreeWidgetItem):
         if obj is not None:
             obj.item = self
         self.sortable = sortable
-        self.setTextAlignment(1, QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
+        self._sortkeys = {}
+        for column in [
+            MainPanel.LENGTH_COLUMN,
+            MainPanel.TRACKNUMBER_COLUMN,
+            MainPanel.DISCNUMBER_COLUMN,
+        ]:
+            self.setTextAlignment(column, QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
+        self.setSizeHint(MainPanel.TITLE_COLUMN, ICON_SIZE)
+
+    def setText(self, column, text):
+        self._sortkeys[column] = None
+        return super().setText(column, text)
 
     def __lt__(self, other):
         if not self.sortable:
@@ -680,16 +892,25 @@ class TreeItem(QtWidgets.QTreeWidgetItem):
         return self.sortkey(column) < other.sortkey(column)
 
     def sortkey(self, column):
-        if column == 1:
-            return self.obj.metadata.length or 0
-        return natsort.natkey(self.text(column).lower())
+        sortkey = self._sortkeys.get(column)
+        if sortkey is not None:
+            return sortkey
+
+        if column == MainPanel.LENGTH_COLUMN:
+            sortkey = self.obj.metadata.length or 0
+        elif column in MainPanel.NAT_SORT_COLUMNS:
+            sortkey = natsort.natkey(self.text(column).lower())
+        else:
+            sortkey = self.text(column).lower()
+        self._sortkeys[column] = sortkey
+        return sortkey
 
 
 class ClusterItem(TreeItem):
 
     def __init__(self, *args):
         super().__init__(*args)
-        self.setIcon(0, ClusterItem.icon_dir)
+        self.setIcon(MainPanel.TITLE_COLUMN, ClusterItem.icon_dir)
 
     def update(self):
         for i, column in enumerate(MainPanel.columns):
@@ -698,7 +919,7 @@ class ClusterItem(TreeItem):
         if self.obj.special and album and album.loaded:
             album.item.update(update_tracks=False)
         if self.isSelected():
-            TreeItem.window.update_selection()
+            TreeItem.window.update_selection(new_selection=False)
 
     def add_file(self, file):
         self.add_files([file])
@@ -712,8 +933,8 @@ class ClusterItem(TreeItem):
         # Benchmarked performance was not noticeably different.
         for file in files:
             item = FileItem(file, True)
-            item.update()
             self.addChild(item)
+            item.update()
 
     def remove_file(self, file):
         file.item.setSelected(False)
@@ -755,46 +976,68 @@ class AlbumItem(TreeItem):
                 for item in items:  # Update after insertChildren so that setExpanded works
                     item.update(update_album=False)
         if album.errors:
-            self.setIcon(0, AlbumItem.icon_error)
-            self.setToolTip(0, _("Error"))
+            self.setIcon(MainPanel.TITLE_COLUMN, AlbumItem.icon_error)
+            self.setToolTip(MainPanel.TITLE_COLUMN, _("Error"))
         elif album.is_complete():
             if album.is_modified():
-                self.setIcon(0, AlbumItem.icon_cd_saved_modified)
-                self.setToolTip(0, _("Album modified and complete"))
+                self.setIcon(MainPanel.TITLE_COLUMN, AlbumItem.icon_cd_saved_modified)
+                self.setToolTip(MainPanel.TITLE_COLUMN, _("Album modified and complete"))
             else:
-                self.setIcon(0, AlbumItem.icon_cd_saved)
-                self.setToolTip(0, _("Album unchanged and complete"))
+                self.setIcon(MainPanel.TITLE_COLUMN, AlbumItem.icon_cd_saved)
+                self.setToolTip(MainPanel.TITLE_COLUMN, _("Album unchanged and complete"))
         else:
             if album.is_modified():
-                self.setIcon(0, AlbumItem.icon_cd_modified)
-                self.setToolTip(0, _("Album modified"))
+                self.setIcon(MainPanel.TITLE_COLUMN, AlbumItem.icon_cd_modified)
+                self.setToolTip(MainPanel.TITLE_COLUMN, _("Album modified"))
             else:
-                self.setIcon(0, AlbumItem.icon_cd)
-                self.setToolTip(0, _("Album unchanged"))
+                self.setIcon(MainPanel.TITLE_COLUMN, AlbumItem.icon_cd)
+                self.setToolTip(MainPanel.TITLE_COLUMN, _("Album unchanged"))
         for i, column in enumerate(MainPanel.columns):
             self.setText(i, album.column(column[1]))
         if selection_changed:
-            TreeItem.window.panel.update_current_view()
+            TreeItem.window.update_selection(new_selection=False)
         # Workaround for PICARD-1446: Expand/collapse indicator for the release
         # is briefly missing on Windows
         self.emitDataChanged()
+
+    def __lt__(self, other):
+        # Always show NAT entry on top, see also NatAlbumItem.__lt__
+        if isinstance(other, NatAlbumItem):
+            return not other.__lt__(self)
+        return super().__lt__(other)
+
+
+class NatAlbumItem(AlbumItem):
+    def __lt__(self, other):
+        # Always show NAT entry on top
+        order = self.treeWidget().header().sortIndicatorOrder()
+        return order == QtCore.Qt.AscendingOrder
 
 
 class TrackItem(TreeItem):
 
     def update(self, update_album=True, update_files=True):
         track = self.obj
+        tree_widget = self.treeWidget()
         if track.num_linked_files == 1:
             file = track.linked_files[0]
             file.item = self
             color = TrackItem.track_colors[file.state]
             bgcolor = get_match_color(file.similarity, TreeItem.base_color)
             icon = FileItem.decide_file_icon(file)
-            self.setToolTip(0, _(FileItem.decide_file_icon_info(file)))
+            self.setToolTip(MainPanel.TITLE_COLUMN, _(FileItem.decide_file_icon_info(file)))
             self.takeChildren()
             self.setExpanded(False)
+            self.setToolTip(MainPanel.FINGERPRINT_COLUMN, FileItem.decide_fingerprint_icon_info(file))
+            if tree_widget:
+                if not tree_widget.itemWidget(self, MainPanel.FINGERPRINT_COLUMN):
+                    tree_widget.setItemWidget(self, MainPanel.FINGERPRINT_COLUMN,
+                        FingerprintColumnWidget(file=file))
         else:
-            self.setToolTip(0, "")
+            self.setToolTip(MainPanel.TITLE_COLUMN, "")
+            self.setToolTip(MainPanel.FINGERPRINT_COLUMN, "")
+            if tree_widget:
+                tree_widget.setItemWidget(self, MainPanel.FINGERPRINT_COLUMN, None)
             if track.ignored_for_completeness():
                 color = TreeItem.text_color_secondary
             else:
@@ -828,16 +1071,16 @@ class TrackItem(TreeItem):
                     self.addChildren(items)
             self.setExpanded(True)
         if track.error:
-            self.setIcon(0, TrackItem.icon_error)
-            self.setToolTip(0, track.error)
+            self.setIcon(MainPanel.TITLE_COLUMN, TrackItem.icon_error)
+            self.setToolTip(MainPanel.TITLE_COLUMN, track.error)
         else:
-            self.setIcon(0, icon)
+            self.setIcon(MainPanel.TITLE_COLUMN, icon)
         for i, column in enumerate(MainPanel.columns):
             self.setText(i, track.column(column[1]))
             self.setForeground(i, color)
             self.setBackground(i, bgcolor)
         if self.isSelected():
-            TreeItem.window.update_selection()
+            TreeItem.window.update_selection(new_selection=False)
         if update_album:
             self.parent().update(update_tracks=False)
 
@@ -846,16 +1089,21 @@ class FileItem(TreeItem):
 
     def update(self, update_track=True):
         file = self.obj
-        self.setIcon(0, FileItem.decide_file_icon(file))
+        self.setIcon(MainPanel.TITLE_COLUMN, FileItem.decide_file_icon(file))
+        self.setToolTip(MainPanel.FINGERPRINT_COLUMN, self.decide_fingerprint_icon_info(file))
         color = FileItem.file_colors[file.state]
         bgcolor = get_match_color(file.similarity, TreeItem.base_color)
         for i, column in enumerate(MainPanel.columns):
             self.setText(i, file.column(column[1]))
             self.setForeground(i, color)
             self.setBackground(i, bgcolor)
+        tree_widget = self.treeWidget()
+        if tree_widget:
+            if not tree_widget.itemWidget(self, MainPanel.FINGERPRINT_COLUMN):
+                tree_widget.setItemWidget(self, MainPanel.FINGERPRINT_COLUMN,
+                    FingerprintColumnWidget(file=file))
         if self.isSelected():
-            TreeItem.window.update_selection()
-
+            TreeItem.window.update_selection(new_selection=False)
         parent = self.parent()
         if isinstance(parent, TrackItem) and update_track:
             parent.update(update_files=False)
@@ -888,3 +1136,13 @@ class FileItem(TreeItem):
                 return FileItem.match_icons_info[int(file.similarity * 5 + 0.5)]
         elif file.state == File.PENDING:
             return N_("Pending")
+
+    @staticmethod
+    def decide_fingerprint_icon_info(file):
+        if file.acoustid_fingerprint:
+            if QtCore.QObject.tagger.acoustidmanager.is_submitted(file):
+                return _('Fingerprint has already been submitted')
+            else:
+                return _('Unsubmitted fingerprint')
+        else:
+            return _('No fingerprint was calculated for this file, use "Scan" or "Generate AcoustID Fingerprints" to calculate the fingerprint.')

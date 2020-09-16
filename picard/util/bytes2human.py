@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 #
 # Picard, the next-generation MusicBrainz tagger
-# Copyright (C) 2013 Laurent Monin
+#
+# Copyright (C) 2013, 2019-2020 Laurent Monin
+# Copyright (C) 2018 Wieland Hoffmann
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -17,9 +19,10 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 
+
 """Helper class to convert bytes to human-readable form
 
-It supports i18n through gettext, decimal and binary units.
+It supports l10n through gettext, decimal and binary units.
 
 >>> n = 1572864
 >>> [binary(n), decimal(n)]
@@ -45,26 +48,26 @@ _BYTES_STRINGS_I18N = (
 )
 
 
-def decimal(number, scale=1):
+def decimal(number, scale=1, l10n=True):
     """
     Convert bytes to short human-readable string, decimal mode
 
     >>> [decimal(n) for n in [1000, 1024, 15500]]
     ['1 kB', '1 kB', '15.5 kB']
     """
-    return short_string(int(number), 1000, scale)
+    return short_string(int(number), 1000, scale=scale, l10n=l10n)
 
 
-def binary(number, scale=1):
+def binary(number, scale=1, l10n=True):
     """
     Convert bytes to short human-readable string, binary mode
     >>> [binary(n) for n in [1000, 1024, 15500]]
     ['1000 B', '1 KiB', '15.1 KiB']
     """
-    return short_string(int(number), 1024, scale)
+    return short_string(int(number), 1024, scale=scale, l10n=l10n)
 
 
-def short_string(number, multiple, scale=1):
+def short_string(number, multiple, scale=1, l10n=True):
     """
     Returns short human-readable string for `number` bytes
     >>> [short_string(n, 1024, 2) for n in [1000, 1100, 15500]]
@@ -81,8 +84,11 @@ def short_string(number, multiple, scale=1):
     else:
         fmt = '%%0.%df' % scale
         num = nr
-    fmtnum = locale.format_string(fmt, num)
-    return _("%s " + unit) % fmtnum
+    if l10n:
+        fmtnum = locale.format_string(fmt, num)
+        return _("%s " + unit) % fmtnum
+    else:
+        return fmt % num + " " + unit
 
 
 def calc_unit(number, multiple=1000):

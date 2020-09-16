@@ -1,7 +1,21 @@
 # -*- coding: utf-8 -*-
 #
 # Picard, the next-generation MusicBrainz tagger
-# Copyright (C) 2006-2007 Lukáš Lalinský
+#
+# Copyright (C) 2006-2008, 2011 Lukáš Lalinský
+# Copyright (C) 2009, 2015, 2018-2020 Philipp Wolfer
+# Copyright (C) 2011-2014 Michael Wiencek
+# Copyright (C) 2012 Chad Wilson
+# Copyright (C) 2012 Johannes Weißl
+# Copyright (C) 2012-2014, 2018 Wieland Hoffmann
+# Copyright (C) 2013-2014, 2016, 2018-2020 Laurent Monin
+# Copyright (C) 2013-2014, 2017 Sophist-UK
+# Copyright (C) 2016 Rahul Raturi
+# Copyright (C) 2016-2017 Sambhav Kothari
+# Copyright (C) 2017-2018 Antonio Larrosa
+# Copyright (C) 2018 Vishal Choudhary
+# Copyright (C) 2018 Xincognito10
+# Copyright (C) 2020 Ray Bouchard
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -15,8 +29,9 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
-# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301,
-# USA.
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
+
+
 from collections import namedtuple
 from collections.abc import (
     Iterable,
@@ -26,13 +41,19 @@ from collections.abc import (
 from PyQt5.QtCore import QObject
 
 from picard import config
-from picard.mbjson import artist_credit_from_node
+from picard.mbjson import (
+    artist_credit_from_node,
+    get_score,
+)
 from picard.plugin import (
     PluginFunctions,
     PluginPriority,
 )
 from picard.similarity import similarity2
-from picard.util import linear_combination_of_weights
+from picard.util import (
+    extract_year_from_date,
+    linear_combination_of_weights,
+)
 from picard.util.imagelist import ImageList
 from picard.util.tags import PRESERVED_TAGS
 
@@ -55,6 +76,72 @@ SimMatchTrack = namedtuple('SimMatchTrack', 'similarity releasegroup release tra
 SimMatchRelease = namedtuple('SimMatchRelease', 'similarity release')
 
 
+def weights_from_release_type_scores(parts, release, release_type_scores,
+                                     weight_release_type=1):
+    # This function generates a score that determines how likely this release will be selected in a lookup.
+    # The score goes from 0 to 1 with 1 being the most likely to be chosen and 0 the least likely
+    # This score is based on the preferences of release-types found in this release
+    # This algorithm works by taking the scores of the primary type (and secondary if found) and averages them
+    # If no types are found, it is set to the score of the 'Other' type or 0.5 if 'Other' doesnt exist
+    # It appends (score, weight_release_type) to passed parts list
+
+    # if our preference is zero for the release_type, force to never return this recording
+    # by using a large zero weight. This means it only gets picked if there are no others at all.
+    skip_release = False
+
+    type_scores = dict(release_type_scores)
+    score = 0.0
+    if 'release-group' in release and 'primary-type' in release['release-group']:
+        types_found = [release['release-group']['primary-type']]
+        if 'secondary-types' in release['release-group']:
+            types_found += release['release-group']['secondary-types']
+        other_score = type_scores.get('Other', 0.5)
+        for release_type in types_found:
+            type_score = type_scores.get(release_type, other_score)
+            if type_score == 0:
+                skip_release = True
+            score += type_score
+        score /= len(types_found)
+
+    if skip_release:
+        parts.append((0, 9999))
+    else:
+        parts.append((score, weight_release_type))
+
+
+def weights_from_preferred_countries(parts, release,
+                                     preferred_countries,
+                                     weight):
+    total_countries = len(preferred_countries)
+    if total_countries:
+        score = 0.0
+        if "country" in release:
+            try:
+                i = preferred_countries.index(release['country'])
+                score = float(total_countries - i) / float(total_countries)
+            except ValueError:
+                pass
+        parts.append((score, weight))
+
+
+def weights_from_preferred_formats(parts, release, preferred_formats, weight):
+    total_formats = len(preferred_formats)
+    if total_formats and 'media' in release:
+        score = 0.0
+        subtotal = 0
+        for medium in release['media']:
+            if "format" in medium:
+                try:
+                    i = preferred_formats.index(medium['format'])
+                    score += float(total_formats - i) / float(total_formats)
+                except ValueError:
+                    pass
+                subtotal += 1
+        if subtotal > 0:
+            score /= subtotal
+        parts.append((score, weight))
+
+
 class Metadata(MutableMapping):
 
     """List of metadata items with dict-like access."""
@@ -65,7 +152,18 @@ class Metadata(MutableMapping):
         ('album', 12),
         ('tracknumber', 6),
         ('totaltracks', 5),
+        ('discnumber', 5),
+        ('totaldiscs', 4),
     ]
+
+    __date_match_factors = {
+        'exact': 1.00,
+        'year': 0.95,
+        'close_year': 0.85,
+        'exists_vs_null': 0.65,
+        'no_release_date': 0.25,
+        'differed': 0.0
+    }
 
     multi_valued_joiner = MULTI_VALUED_JOINER
 
@@ -99,18 +197,22 @@ class Metadata(MutableMapping):
         return (1.0 - min(abs(a - b),
                 LENGTH_SCORE_THRES_MS) / float(LENGTH_SCORE_THRES_MS))
 
-    def compare(self, other):
+    def compare(self, other, ignored=None):
         parts = []
+        if ignored is None:
+            ignored = []
 
-        if self.length and other.length:
+        if self.length and other.length and '~length' not in ignored:
             score = self.length_score(self.length, other.length)
             parts.append((score, 8))
 
         for name, weight in self.__weights:
+            if name in ignored:
+                continue
             a = self[name]
             b = other[name]
             if a and b:
-                if name in ('tracknumber', 'totaltracks'):
+                if name in ('tracknumber', 'totaltracks', 'discnumber', 'totaldiscs'):
                     try:
                         ia = int(a)
                         ib = int(b)
@@ -132,9 +234,7 @@ class Metadata(MutableMapping):
         linear combination of weights that the metadata matches a certain album.
         """
         parts = self.compare_to_release_parts(release, weights)
-        sim = linear_combination_of_weights(parts)
-        if 'score' in release:
-            sim *= release['score'] / 100
+        sim = linear_combination_of_weights(parts) * get_score(release)
         return SimMatchRelease(similarity=sim, release=release)
 
     def compare_to_release_parts(self, release, weights):
@@ -156,54 +256,54 @@ class Metadata(MutableMapping):
         except (ValueError, KeyError):
             pass
 
-        preferred_countries = config.setting["preferred_release_countries"]
-        preferred_formats = config.setting["preferred_release_formats"]
+        # Date Logic
+        date_match_factor = 0.0
+        if "date" in release and release['date'] != '':
+            release_date = release['date']
+            if "date" in self:
+                metadata_date = self['date']
+                if release_date == metadata_date:
+                    # release has a date and it matches what our metadata had exactly.
+                    date_match_factor = self.__date_match_factors['exact']
+                else:
+                    release_year = extract_year_from_date(release_date)
+                    if release_year is not None:
+                        metadata_year = extract_year_from_date(metadata_date)
+                        if metadata_year is not None:
+                            if release_year == metadata_year:
+                                # release has a date and it matches what our metadata had for year exactly.
+                                date_match_factor = self.__date_match_factors['year']
+                            elif abs(release_year - metadata_year) <= 2:
+                                # release has a date and it matches what our metadata had closely (year +/- 2).
+                                date_match_factor = self.__date_match_factors['close_year']
+                            else:
+                                # release has a date but it does not match ours (all else equal,
+                                # its better to have an unknown date than a wrong date, since
+                                # the unknown could actually be correct)
+                                date_match_factor = self.__date_match_factors['differed']
+            else:
+                # release has a date but we don't have one (all else equal, we prefer
+                # tracks that have non-blank date values)
+                date_match_factor = self.__date_match_factors['exists_vs_null']
+        else:
+            # release has a no date (all else equal, we don't prefer this
+            # release since its date is missing)
+            date_match_factor = self.__date_match_factors['no_release_date']
 
-        total_countries = len(preferred_countries)
-        if total_countries:
-            score = 0.0
-            if "country" in release:
-                try:
-                    i = preferred_countries.index(release['country'])
-                    score = float(total_countries - i) / float(total_countries)
-                except ValueError:
-                    pass
-            parts.append((score, weights["releasecountry"]))
+        parts.append((date_match_factor, weights['date']))
 
-        total_formats = len(preferred_formats)
-        if total_formats and 'media' in release:
-            score = 0.0
-            subtotal = 0
-            for medium in release['media']:
-                if "format" in medium:
-                    try:
-                        i = preferred_formats.index(medium['format'])
-                        score += float(total_formats - i) / float(total_formats)
-                    except ValueError:
-                        pass
-                    subtotal += 1
-            if subtotal > 0:
-                score /= subtotal
-            parts.append((score, weights["format"]))
+        weights_from_preferred_countries(parts, release,
+                                         config.setting["preferred_release_countries"],
+                                         weights["releasecountry"])
+
+        weights_from_preferred_formats(parts, release,
+                                       config.setting["preferred_release_formats"],
+                                       weights["format"])
 
         if "releasetype" in weights:
-            # This section generates a score that determines how likely this release will be selected in a lookup.
-            # The score goes from 0 to 1 with 1 being the most likely to be chosen and 0 the least likely
-            # This score is based on the preferences of release-types found in this release
-            # This algorithm works by taking the scores of the primary type (and secondary if found) and averages them
-            # If no types are found, it is set to the score of the 'Other' type or 0.5 if 'Other' doesnt exist
-
-            type_scores = dict(config.setting["release_type_scores"])
-            score = 0.0
-            other_score = type_scores.get('Other', 0.5)
-            if 'release-group' in release and 'primary-type' in release['release-group']:
-                types_found = [release['release-group']['primary-type']]
-                if 'secondary-types' in release['release-group']:
-                    types_found += release['release-group']['secondary-types']
-                for release_type in types_found:
-                    score += type_scores.get(release_type, other_score)
-                score /= len(types_found)
-            parts.append((score, weights["releasetype"]))
+            weights_from_release_type_scores(parts, release,
+                                             config.setting["release_type_scores"],
+                                             weights["releasetype"])
 
         rg = QObject.tagger.get_release_group_by_id(release['release-group']['id'])
         if release['id'] in rg.loaded_albums:
@@ -235,10 +335,9 @@ class Metadata(MutableMapping):
         if "releases" in track:
             releases = track['releases']
 
+        search_score = get_score(track)
         if not releases:
-            sim = linear_combination_of_weights(parts)
-            if 'score' in track:
-                sim *= track['score'] / 100
+            sim = linear_combination_of_weights(parts) * search_score
             return SimMatchTrack(similarity=sim, releasegroup=None, release=None, track=track)
 
         if 'isvideo' in weights:
@@ -250,9 +349,7 @@ class Metadata(MutableMapping):
         result = SimMatchTrack(similarity=-1, releasegroup=None, release=None, track=None)
         for release in releases:
             release_parts = self.compare_to_release_parts(release, weights)
-            sim = linear_combination_of_weights(parts + release_parts)
-            if 'score' in track:
-                sim *= track['score'] / 100
+            sim = linear_combination_of_weights(parts + release_parts) * search_score
             if sim > result.similarity:
                 rg = release['release-group'] if "release-group" in release else None
                 result = SimMatchTrack(similarity=sim, releasegroup=rg, release=release, track=track)
@@ -299,14 +396,18 @@ class Metadata(MutableMapping):
     def clear_deleted(self):
         self.deleted_tags = set()
 
+    @staticmethod
+    def normalize_tag(name):
+        return name.rstrip(':')
+
     def getall(self, name):
-        return self._store.get(name, [])
+        return self._store.get(self.normalize_tag(name), [])
 
     def getraw(self, name):
-        return self._store[name]
+        return self._store[self.normalize_tag(name)]
 
     def get(self, key, default=None):
-        values = self._store.get(key, None)
+        values = self._store.get(self.normalize_tag(key), None)
         if values:
             return self.multi_valued_joiner.join(values)
         else:
@@ -316,6 +417,7 @@ class Metadata(MutableMapping):
         return self.get(name, '')
 
     def set(self, name, values):
+        name = self.normalize_tag(name)
         if isinstance(values, str) or not isinstance(values, Iterable):
             values = [values]
         values = [str(value) for value in values if value or value == 0]
@@ -329,9 +431,10 @@ class Metadata(MutableMapping):
         self.set(name, values)
 
     def __contains__(self, name):
-        return self._store.__contains__(name)
+        return self._store.__contains__(self.normalize_tag(name))
 
     def __delitem__(self, name):
+        name = self.normalize_tag(name)
         try:
             del self._store[name]
         except KeyError:
@@ -341,16 +444,30 @@ class Metadata(MutableMapping):
 
     def add(self, name, value):
         if value or value == 0:
+            name = self.normalize_tag(name)
             self._store.setdefault(name, []).append(str(value))
             self.deleted_tags.discard(name)
 
     def add_unique(self, name, value):
+        name = self.normalize_tag(name)
         if value not in self.getall(name):
             self.add(name, value)
 
     def delete(self, name):
         """Deprecated: use del directly"""
-        del self[name]
+        del self[self.normalize_tag(name)]
+
+    def unset(self, name):
+        """Removes a tag from the metadata, but does not mark it for deletion.
+
+        Args:
+            name: name of the tag to unset
+        """
+        name = self.normalize_tag(name)
+        try:
+            del self._store[name]
+        except KeyError:
+            pass
 
     def __iter__(self):
         return iter(self._store)

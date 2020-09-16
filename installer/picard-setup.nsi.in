@@ -2,7 +2,7 @@
 
 !define PROJECT_PATH ".."
 
-!define PRODUCT_NAME "%(name)s"
+!define PRODUCT_NAME "%(display-name)s"
 !define PRODUCT_VERSION "%(version)s"
 !define PRODUCT_PUBLISHER "MusicBrainz"
 !define PRODUCT_DESCRIPTION "%(description)s"
@@ -80,7 +80,7 @@ ReserveFile "${NSISDIR}\Plugins\x86-unicode\InstallOptions.dll"
 ; Language handling
 !macro LOAD_LANGUAGE LANGUAGE
   !insertmacro MUI_LANGUAGE "${LANGUAGE}"
-  !include "languages\${LANGUAGE}.nsh"
+  !include "i18n\out\${LANGUAGE}.nsh"
 !macroend
 
 ; Language files
@@ -92,7 +92,7 @@ ReserveFile "${NSISDIR}\Plugins\x86-unicode\InstallOptions.dll"
 !insertmacro LOAD_LANGUAGE "Dutch"
 ; !insertmacro LOAD_LANGUAGE "Estonian"
 ; !insertmacro LOAD_LANGUAGE "Finnish"
-; !insertmacro LOAD_LANGUAGE "French"
+!insertmacro LOAD_LANGUAGE "French"
 !insertmacro LOAD_LANGUAGE "German"
 ; !insertmacro LOAD_LANGUAGE "Greek"
 ; !insertmacro LOAD_LANGUAGE "Hebrew"
@@ -107,14 +107,14 @@ ReserveFile "${NSISDIR}\Plugins\x86-unicode\InstallOptions.dll"
 ; !insertmacro LOAD_LANGUAGE "SimpChinese"
 ; !insertmacro LOAD_LANGUAGE "Slovak"
 ; !insertmacro LOAD_LANGUAGE "Slovenian"
-; !insertmacro LOAD_LANGUAGE "Spanish"
+!insertmacro LOAD_LANGUAGE "Spanish"
 ; !insertmacro LOAD_LANGUAGE "Swedish"
 ; !insertmacro LOAD_LANGUAGE "TradChinese"
 ; !insertmacro LOAD_LANGUAGE "Turkish"
 ; !insertmacro LOAD_LANGUAGE "Ukrainian"
 
 ; Adds info to installer
-VIProductVersion "%(file_version)s"
+VIProductVersion "%(file-version)s"
 VIAddVersionKey /LANG=${LANG_ENGLISH} "ProductName" "${PRODUCT_NAME}"
 VIAddVersionKey /LANG=${LANG_ENGLISH} "Comments" "${PRODUCT_DESCRIPTION}"
 VIAddVersionKey /LANG=${LANG_ENGLISH} "CompanyName" "${PRODUCT_PUBLISHER}"

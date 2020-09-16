@@ -1,8 +1,26 @@
 # -*- coding: utf-8 -*-
 #
 # Picard, the next-generation MusicBrainz tagger
+#
 # Copyright (C) 2004 Robert Kaye
-# Copyright (C) 2006-2007 Lukáš Lalinský
+# Copyright (C) 2006-2009, 2011-2012, 2014 Lukáš Lalinský
+# Copyright (C) 2008 Gary van der Merwe
+# Copyright (C) 2008 Hendrik van Antwerpen
+# Copyright (C) 2008 ojnkpjg
+# Copyright (C) 2008-2011, 2014, 2018-2020 Philipp Wolfer
+# Copyright (C) 2009 Nikolai Prokoschenko
+# Copyright (C) 2011-2012 Chad Wilson
+# Copyright (C) 2011-2013, 2019 Michael Wiencek
+# Copyright (C) 2012-2013, 2016-2017 Wieland Hoffmann
+# Copyright (C) 2013, 2018 Calvin Walton
+# Copyright (C) 2013-2015, 2017 Sophist-UK
+# Copyright (C) 2013-2015, 2017-2019 Laurent Monin
+# Copyright (C) 2016 Suhas
+# Copyright (C) 2016-2018 Sambhav Kothari
+# Copyright (C) 2017 Antonio Larrosa
+# Copyright (C) 2018 Vishal Choudhary
+# Copyright (C) 2019 Joel Lintunen
+# Copyright (C) 2020 Gabriel Ferreira
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -18,7 +36,9 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 
+
 from collections import (
+    OrderedDict,
     defaultdict,
     namedtuple,
 )
@@ -266,6 +286,11 @@ class Album(DataObject, Item):
             del self._new_metadata
             del self._new_tracks
             self.update()
+            if not self._requests:
+                self.loaded = True
+                for func, always in self._after_load_callbacks:
+                    if always:
+                        func()
             return
 
         if self._requests > 0:
@@ -273,8 +298,9 @@ class Album(DataObject, Item):
 
         if not self._tracks_loaded:
             artists = set()
-            totalalbumtracks = 0
+            all_media = []
             absolutetracknumber = 0
+
             va = self._new_metadata['musicbrainz_albumartistid'] == VARIOUS_ARTISTS_ID
 
             djmix_ars = {}
@@ -286,6 +312,9 @@ class Album(DataObject, Item):
                 mm.copy(self._new_metadata)
                 medium_to_metadata(medium_node, mm)
                 discpregap = False
+                format = medium_node.get('format')
+                if format:
+                    all_media.append(format)
 
                 for dj in djmix_ars.get(mm["discnumber"], []):
                     mm.add("djmixer", dj)
@@ -314,7 +343,10 @@ class Album(DataObject, Item):
                         track = self._finalize_loading_track(track_node, mm, artists, va, absolutetracknumber, discpregap)
                         track.metadata['~datatrack'] = "1"
 
-            totalalbumtracks = str(absolutetracknumber)
+            totalalbumtracks = absolutetracknumber
+            self._new_metadata['~totalalbumtracks'] = totalalbumtracks
+            # Generate a list of unique media, but keep order of first appearance
+            self._new_metadata['media'] = " / ".join(list(OrderedDict.fromkeys(all_media)))
 
             for track in self._new_tracks:
                 track.metadata["~totalalbumtracks"] = totalalbumtracks
@@ -348,6 +380,7 @@ class Album(DataObject, Item):
                 for file in list(track.linked_files):
                     file.move(self.unmatched_files)
             self.metadata = self._new_metadata
+            self.orig_metadata.copy(self.metadata)
             self.tracks = self._new_tracks
             del self._new_metadata
             del self._new_tracks
@@ -365,9 +398,11 @@ class Album(DataObject, Item):
                 },
                 timeout=3000
             )
-            for func in self._after_load_callbacks:
+            for func, always in self._after_load_callbacks:
                 func()
             self._after_load_callbacks = []
+            if self.item.isSelected():
+                self.tagger.window.refresh_metadatabox()
 
     def _finalize_loading_track(self, track_node, metadata, artists, va, absolutetracknumber, discpregap):
         # As noted in `_parse_release` above, the release artist nodes
@@ -445,11 +480,11 @@ class Album(DataObject, Item):
             self.id, self._release_request_finished, inc=inc,
             mblogin=require_authentication, priority=priority, refresh=refresh)
 
-    def run_when_loaded(self, func):
+    def run_when_loaded(self, func, always=False):
         if self.loaded:
             func()
         else:
-            self._after_load_callbacks.append(func)
+            self._after_load_callbacks.append((func, always))
 
     def stop_loading(self):
         if self.load_task:
@@ -492,7 +527,7 @@ class Album(DataObject, Item):
         for file in list(files):
             if file.state == File.REMOVED:
                 continue
-            # if we have a recordingid to match against, use that in priority
+            # if we have a recordingid to match against, use that in priority
             recid = recordingid or file.metadata['musicbrainz_recordingid']
             if recid and mbid_validate(recid):
                 if not tracks_cache:
@@ -513,6 +548,7 @@ class Album(DataObject, Item):
                         similarity=track.metadata.compare(file.orig_metadata),
                         track=track
                     )
+                    QtCore.QCoreApplication.processEvents()
 
             no_match = SimMatchAlbum(similarity=-1, track=self.unmatched_files)
             best_match = find_best_match(candidates, no_match)
@@ -549,7 +585,7 @@ class Album(DataObject, Item):
         return True
 
     def can_view_info(self):
-        return (self.loaded and (self.metadata.images or self.orig_metadata.images)) or self.errors
+        return self.loaded or self.errors
 
     def is_album_like(self):
         return True
@@ -639,8 +675,12 @@ class Album(DataObject, Item):
                 return ''
         elif column == 'artist':
             return self.metadata['albumartist']
+        elif column == 'tracknumber':
+            return self.metadata['~totalalbumtracks']
+        elif column == 'discnumber':
+            return self.metadata['totaldiscs']
         else:
-            return ''
+            return self.metadata[column]
 
     def switch_release_version(self, mbid):
         if mbid == self.id:

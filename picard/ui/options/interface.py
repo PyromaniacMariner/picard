@@ -1,7 +1,17 @@
 # -*- coding: utf-8 -*-
 #
 # Picard, the next-generation MusicBrainz tagger
-# Copyright (C) 2007 Lukáš Lalinský
+#
+# Copyright (C) 2007-2008 Lukáš Lalinský
+# Copyright (C) 2008 Will
+# Copyright (C) 2009, 2019-2020 Philipp Wolfer
+# Copyright (C) 2011, 2013 Michael Wiencek
+# Copyright (C) 2013, 2019 Wieland Hoffmann
+# Copyright (C) 2013-2014, 2018 Laurent Monin
+# Copyright (C) 2016 Rahul Raturi
+# Copyright (C) 2016-2018 Sambhav Kothari
+# Copyright (C) 2017 Antonio Larrosa
+# Copyright (C) 2018 Bob Swift
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -16,6 +26,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
+
 
 from functools import partial
 import locale
@@ -51,6 +62,7 @@ class InterfaceOptionsPage(OptionsPage):
     PARENT = None
     SORT_ORDER = 80
     ACTIVE = True
+    HELP_URL = '/config/options_interface.html'
     SEPARATOR = '—' * 5
     TOOLBAR_BUTTONS = {
         'add_directory_action': {
@@ -92,6 +104,10 @@ class InterfaceOptionsPage(OptionsPage):
         'submit_acoustid_action': {
             'label': N_('Submit AcoustIDs'),
             'icon': 'acoustid-fingerprinter'
+        },
+        'generate_fingerprints_action': {
+            'label': N_("Generate Fingerprints"),
+            'icon': 'fingerprint'
         },
         'play_file_action': {
             'label': N_('Open in Player'),
@@ -138,7 +154,7 @@ class InterfaceOptionsPage(OptionsPage):
         self.ui = Ui_InterfaceOptionsPage()
         self.ui.setupUi(self)
         self.ui.ui_language.addItem(_('System default'), '')
-        language_list = [(l[0], l[1], _(l[2])) for l in UI_LANGUAGES]
+        language_list = [(lang[0], lang[1], _(lang[2])) for lang in UI_LANGUAGES]
 
         def fcmp(x):
             return locale.strxfrm(x[2])
@@ -292,6 +308,7 @@ class AddActionDialog(PicardDialog):
         self.setWindowModality(QtCore.Qt.WindowModal)
 
         layout = QtWidgets.QVBoxLayout(self)
+        layout.setSizeConstraint(QtWidgets.QLayout.SetFixedSize)
 
         # TODO: Remove temporary workaround once https://github.com/python-babel/babel/issues/415 has been resolved.
         babel_415_workaround_list = []

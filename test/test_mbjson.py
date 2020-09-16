@@ -1,13 +1,39 @@
-import json
-import os
+# -*- coding: utf-8 -*-
+#
+# Picard, the next-generation MusicBrainz tagger
+#
+# Copyright (C) 2017 Sambhav Kothari
+# Copyright (C) 2017, 2019 Laurent Monin
+# Copyright (C) 2018 Wieland Hoffmann
+# Copyright (C) 2018-2020 Philipp Wolfer
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 2
+# of the License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 
-from test.picardtestcase import PicardTestCase
+
+from test.picardtestcase import (
+    PicardTestCase,
+    load_test_json,
+)
 
 from picard import config
 from picard.album import Album
 from picard.mbjson import (
+    _decamelcase,
     artist_to_metadata,
     countries_from_node,
+    get_score,
     label_info_from_node,
     media_formats_from_node,
     medium_to_metadata,
@@ -27,6 +53,8 @@ settings = {
     "standardize_releases": False,
     "translate_artist_names": True,
     "standardize_instruments": True,
+    "release_ars": True,
+    "preferred_release_countries": [],
     "artist_locale": 'en'
 }
 
@@ -38,9 +66,7 @@ class MBJSONTest(PicardTestCase):
 
     def init_test(self, filename):
         config.setting = settings.copy()
-        self.json_doc = None
-        with open(os.path.join('test', 'data', 'ws_data', filename), encoding='utf-8') as f:
-            self.json_doc = json.load(f)
+        self.json_doc = load_test_json(filename)
 
 
 class ReleaseTest(MBJSONTest):
@@ -61,19 +87,64 @@ class ReleaseTest(MBJSONTest):
         self.assertEqual(m['label'], 'Harvest')
         self.assertEqual(m['musicbrainz_albumartistid'], '83d91898-7763-47d7-b03b-b92132375c47')
         self.assertEqual(m['musicbrainz_albumid'], 'b84ee12a-09ef-421b-82de-0441a926375b')
+        self.assertEqual(m['producer'], 'Hipgnosis')
         self.assertEqual(m['releasecountry'], 'GB')
         self.assertEqual(m['releasestatus'], 'official')
         self.assertEqual(m['script'], 'Latn')
         self.assertEqual(m['~albumartists'], 'Pink Floyd')
         self.assertEqual(m['~albumartists_sort'], 'Pink Floyd')
         self.assertEqual(m['~releaselanguage'], 'eng')
+        self.assertEqual(m.getall('~releasecountries'), ['GB', 'NZ'])
         self.assertEqual(a.genres, {
             'genre1': 6, 'genre2': 3,
-            'tag1': 6, 'tag2': 3 })
+            'tag1': 6, 'tag2': 3})
         for artist in a._album_artists:
             self.assertEqual(artist.genres, {
                 'british': 2,
-                'progressive rock': 10 })
+                'progressive rock': 10})
+
+    def test_release_without_release_relationships(self):
+        config.setting['release_ars'] = False
+        m = Metadata()
+        a = Album("1")
+        release_to_metadata(self.json_doc, m, a)
+        self.assertEqual(m['album'], 'The Dark Side of the Moon')
+        self.assertEqual(m['albumartist'], 'Pink Floyd')
+        self.assertEqual(m['albumartistsort'], 'Pink Floyd')
+        self.assertEqual(m['asin'], 'b123')
+        self.assertEqual(m['barcode'], '123')
+        self.assertEqual(m['catalognumber'], 'SHVL 804')
+        self.assertEqual(m['date'], '1973-03-24')
+        self.assertEqual(m['label'], 'Harvest')
+        self.assertEqual(m['musicbrainz_albumartistid'], '83d91898-7763-47d7-b03b-b92132375c47')
+        self.assertEqual(m['musicbrainz_albumid'], 'b84ee12a-09ef-421b-82de-0441a926375b')
+        self.assertEqual(m['producer'], '')
+        self.assertEqual(m['releasecountry'], 'GB')
+        self.assertEqual(m['releasestatus'], 'official')
+        self.assertEqual(m['script'], 'Latn')
+        self.assertEqual(m['~albumartists'], 'Pink Floyd')
+        self.assertEqual(m['~albumartists_sort'], 'Pink Floyd')
+        self.assertEqual(m['~releaselanguage'], 'eng')
+        self.assertEqual(m.getall('~releasecountries'), ['GB', 'NZ'])
+        self.assertEqual(a.genres, {
+            'genre1': 6, 'genre2': 3,
+            'tag1': 6, 'tag2': 3})
+        for artist in a._album_artists:
+            self.assertEqual(artist.genres, {
+                'british': 2,
+                'progressive rock': 10})
+
+    def test_preferred_release_country(self):
+        m = Metadata()
+        a = Album("1")
+        release_to_metadata(self.json_doc, m, a)
+        self.assertEqual(m['releasecountry'], 'GB')
+        config.setting['preferred_release_countries'] = ['NZ', 'GB']
+        release_to_metadata(self.json_doc, m, a)
+        self.assertEqual(m['releasecountry'], 'NZ')
+        config.setting['preferred_release_countries'] = ['GB', 'NZ']
+        release_to_metadata(self.json_doc, m, a)
+        self.assertEqual(m['releasecountry'], 'GB')
 
     def test_media_formats_from_node(self):
         formats = media_formats_from_node(self.json_doc['media'])
@@ -122,11 +193,11 @@ class RecordingTest(MBJSONTest):
         self.assertEqual(m['~recordingtitle'], 'Thinking Out Loud')
         self.assertEqual(t.genres, {
             'blue-eyed soul': 1,
-            'pop': 3 })
+            'pop': 3})
         for artist in t._track_artists:
             self.assertEqual(artist.genres, {
                 'dance-pop': 1,
-                'guitarist': 0 })
+                'guitarist': 0})
 
     def test_recording_instrument_credits(self):
         m = Metadata()
@@ -135,6 +206,19 @@ class RecordingTest(MBJSONTest):
         recording_to_metadata(self.json_doc, m, t)
         self.assertEqual(m['performer:vocals'], 'Ed Sheeran')
         self.assertEqual(m['performer:acoustic guitar'], 'Ed Sheeran')
+
+
+class RecordingInstrumentalTest(MBJSONTest):
+
+    filename = 'recording_instrumental.json'
+
+    def test_recording(self):
+        m = Metadata()
+        t = Track('1')
+        recording_to_metadata(self.json_doc, m, t)
+        self.assertIn('instrumental', m.getall('~performance_attributes'))
+        self.assertEqual(m['language'], 'zxx')
+        self.assertNotIn('lyricist', m)
 
 
 class NullRecordingTest(MBJSONTest):
@@ -168,6 +252,12 @@ class RecordingCreditsTest(MBJSONTest):
         self.assertNotIn('performer:solo', m)
         self.assertEqual(m['performer:solo vocals'], 'Anni-Frid Lyngstad')
 
+    def test_recording_instrument_decamelcase(self):
+        m = Metadata()
+        t = Track("1")
+        recording_to_metadata(self.json_doc, m, t)
+        self.assertEqual(m['performer:ewi'], 'Michael Brecker')
+
 
 class TrackTest(MBJSONTest):
 
@@ -180,12 +270,24 @@ class TrackTest(MBJSONTest):
         self.assertEqual(m['title'], 'Speak to Me')
         self.assertEqual(m['musicbrainz_recordingid'], 'bef3fddb-5aca-49f5-b2fd-d56a23268d63')
         self.assertEqual(m['musicbrainz_trackid'], 'd4156411-b884-368f-a4cb-7c0101a557a2')
-        self.assertEqual(m['title'], 'Speak to Me')
         self.assertEqual(m['~length'], '1:08')
         self.assertEqual(m['tracknumber'], '1')
         self.assertEqual(m['~musicbrainz_tracknumber'], 'A1')
         self.assertEqual(m['~recordingcomment'], 'original stereo mix')
         self.assertEqual(m['~recordingtitle'], 'Speak to Me')
+
+
+class PregapTrackTest(MBJSONTest):
+
+    filename = 'track_pregap.json'
+
+    def test_track(self):
+        t = Track("1")
+        m = t.metadata
+        track_to_metadata(self.json_doc, t)
+        self.assertEqual(m['title'], 'Lady')
+        self.assertEqual(m['tracknumber'], '0')
+        self.assertEqual(m['~musicbrainz_tracknumber'], '0')
 
 
 class NullTrackTest(MBJSONTest):
@@ -288,6 +390,7 @@ class CountriesFromNodeTest(MBJSONTest):
         countries = countries_from_node(self.json_doc)
         self.assertEqual([], countries)
 
+
 class CountriesFromNodeNullTest(MBJSONTest):
 
     filename = 'country_null.json'
@@ -324,3 +427,21 @@ class NullLabelInfoTest(MBJSONTest):
     def test_label_info_from_node_0(self):
         label_info = label_info_from_node(self.json_doc['releases'][0]['label-info'])
         self.assertEqual(label_info, ([], []))
+
+
+class GetScoreTest(PicardTestCase):
+    def test_get_score(self):
+        for score, expected in ((42, 0.42), ('100', 1.0), (0, 0.0), (None, 1.0), ('', 1.0)):
+            self.assertEqual(expected, get_score({'score': score}))
+
+    def test_get_score_no_score(self):
+        self.assertEqual(1.0, get_score({}))
+
+
+class DecamelcaseTest(PicardTestCase):
+    def test_decamelcase(self):
+        self.assertEqual('foo bar', _decamelcase('foo bar'))
+        self.assertEqual('Foo Bar', _decamelcase('Foo Bar'))
+        self.assertEqual('Foo Bar', _decamelcase('FooBar'))
+        self.assertEqual('Foo BAr', _decamelcase('FooBAr'))
+        self.assertEqual('EWI', _decamelcase('EWI'))

@@ -1,7 +1,12 @@
 # -*- coding: utf-8 -*-
 #
 # Picard, the next-generation MusicBrainz tagger
-# Copyright (C) 2017 Sambhav Kothari
+#
+# Copyright (C) 2017 David Mandelberg
+# Copyright (C) 2017-2018 Sambhav Kothari
+# Copyright (C) 2017-2019 Laurent Monin
+# Copyright (C) 2018-2020 Philipp Wolfer
+# Copyright (C) 2019 Michael Wiencek
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -16,6 +21,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
+
 
 import re
 
@@ -37,7 +43,7 @@ _artist_rel_types = {
     "concertmaster": "performer:concertmaster",
     "conductor": "conductor",
     "engineer": "engineer",
-    "instrumentator": "arranger",
+    "instrument arranger": "arranger",
     "librettist": "lyricist",
     "live sound": "engineer",
     "lyricist": "lyricist",
@@ -94,7 +100,7 @@ _RELEASE_GROUP_TO_METADATA = {
 
 
 def _decamelcase(text):
-    return re.sub(r'([A-Z])', r' \1', text).strip()
+    return re.sub(r'(?<![A-Z\s])([A-Z])', r' \1', text).strip()
 
 
 _REPLACE_MAP = {}
@@ -337,7 +343,7 @@ def track_to_metadata(node, track):
     m.add_unique('musicbrainz_trackid', node['id'])
     # overwrite with data we have on the track
     for key, value in node.items():
-        if not value:
+        if not value and value != 0:
             continue
         if key in _TRACK_TO_METADATA:
             m[_TRACK_TO_METADATA[key]] = value
@@ -353,7 +359,7 @@ def recording_to_metadata(node, m, track=None):
     m.length = 0
     m.add_unique('musicbrainz_recordingid', node['id'])
     for key, value in node.items():
-        if not value:
+        if not value and value != 0:
             continue
         if key in _RECORDING_TO_METADATA:
             m[_RECORDING_TO_METADATA[key]] = value
@@ -383,6 +389,9 @@ def recording_to_metadata(node, m, track=None):
         m['~recordingtitle'] = m['title']
     if m.length:
         m['~length'] = format_time(m.length)
+    if 'instrumental' in m.getall('~performance_attributes'):
+        m.unset('lyricist')
+        m['language'] = 'zxx'
 
 
 def performance_to_metadata(relation, m):
@@ -406,7 +415,7 @@ def work_to_metadata(work, m):
 
 def medium_to_metadata(node, m):
     for key, value in node.items():
-        if not value:
+        if not value and value != 0:
             continue
         if key in _MEDIUM_TO_METADATA:
             m[_MEDIUM_TO_METADATA[key]] = value
@@ -416,7 +425,7 @@ def artist_to_metadata(node, m):
     """Make meatadata dict from a JSON 'artist' node."""
     m.add_unique("musicbrainz_artistid", node['id'])
     for key, value in node.items():
-        if not value:
+        if not value and value != 0:
             continue
         if key in _ARTIST_TO_METADATA:
             m[_ARTIST_TO_METADATA[key]] = value
@@ -439,7 +448,7 @@ def release_to_metadata(node, m, album=None):
     """Make metadata dict from a JSON 'release' node."""
     m.add_unique('musicbrainz_albumid', node['id'])
     for key, value in node.items():
-        if not value:
+        if not value and value != 0:
             continue
         if key in _RELEASE_TO_METADATA:
             m[_RELEASE_TO_METADATA[key]] = value
@@ -453,7 +462,7 @@ def release_to_metadata(node, m, album=None):
                     artist = credit['artist']
                     artist_obj = album.append_album_artist(artist['id'])
                     add_genres_from_node(artist, artist_obj)
-        elif key == 'relations':
+        elif key == 'relations' and config.setting['release_ars']:
             _relations_to_metadata(value, m)
         elif key == 'label-info':
             m['label'], m['catalognumber'] = label_info_from_node(value)
@@ -462,6 +471,14 @@ def release_to_metadata(node, m, album=None):
                 m['~releaselanguage'] = value['language']
             if 'script' in value:
                 m['script'] = value['script']
+    m['~releasecountries'] = release_countries = countries_from_node(node)
+    # The MB web service returns the first release country in the country tag.
+    # If the user has configured preferred release countries, use the first one
+    # if it is one in the complete list of release countries.
+    for country in config.setting["preferred_release_countries"]:
+        if country in release_countries:
+            m['releasecountry'] = country
+            break
     add_genres_from_node(node, album)
 
 
@@ -469,7 +486,7 @@ def release_group_to_metadata(node, m, release_group=None):
     """Make metadata dict from a JSON 'release-group' node taken from inside a 'release' node."""
     m.add_unique('musicbrainz_releasegroupid', node['id'])
     for key, value in node.items():
-        if not value:
+        if not value and value != 0:
             continue
         if key in _RELEASE_GROUP_TO_METADATA:
             m[_RELEASE_GROUP_TO_METADATA[key]] = value
@@ -519,3 +536,15 @@ def add_user_genres(node, obj):
 def add_isrcs_to_metadata(node, metadata):
     for isrc in node:
         metadata.add('isrc', isrc)
+
+
+def get_score(node):
+    """Returns the score attribute for a node.
+    The score is expected to be an integer between 0 and 100, it is returned as
+    a value between 0.0 and 1.0. If there is no score attribute or it has an
+    invalid value 1.0 will be returned.
+    """
+    try:
+        return int(node.get('score', 100)) / 100
+    except (TypeError, ValueError):
+        return 1.0

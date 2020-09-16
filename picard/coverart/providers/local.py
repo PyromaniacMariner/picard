@@ -1,7 +1,11 @@
 # -*- coding: utf-8 -*-
 #
 # Picard, the next-generation MusicBrainz tagger
-# Copyright (C) 2015 Laurent Monin
+#
+# Copyright (C) 2015, 2018-2019 Laurent Monin
+# Copyright (C) 2016-2017 Sambhav Kothari
+# Copyright (C) 2017 Ville Skyttä
+# Copyright (C) 2019 Philipp Wolfer
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -17,12 +21,13 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 
+
 import os
 import re
 
 from picard import config
 from picard.coverart.image import LocalFileCoverArtImage
-from picard.coverart.providers import (
+from picard.coverart.providers.provider import (
     CoverArtProvider,
     ProviderOptions,
 )
@@ -36,6 +41,7 @@ class ProviderOptionsLocal(ProviderOptions):
         Options for Local Files cover art provider
     """
 
+    HELP_URL = '/config/options_local_files.html'
     _DEFAULT_LOCAL_COVER_ART_REGEX = r'^(?:cover|folder|albumart)(.*)\.(?:jpe?g|png|gif|tiff?)$'
 
     options = [

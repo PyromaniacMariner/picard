@@ -1,7 +1,21 @@
 # -*- coding: utf-8 -*-
 #
 # Picard, the next-generation MusicBrainz tagger
-# Copyright (C) 2006,2011 Lukáš Lalinský
+#
+# Copyright (C) 2006-2007, 2011 Lukáš Lalinský
+# Copyright (C) 2009 Carlin Mangar
+# Copyright (C) 2009, 2018-2020 Philipp Wolfer
+# Copyright (C) 2011-2013 Michael Wiencek
+# Copyright (C) 2012 Chad Wilson
+# Copyright (C) 2012-2014 Wieland Hoffmann
+# Copyright (C) 2013-2014, 2017-2019 Laurent Monin
+# Copyright (C) 2014 Francois Ferrand
+# Copyright (C) 2015 Sophist-UK
+# Copyright (C) 2016 Ville Skyttä
+# Copyright (C) 2016-2017 Sambhav Kothari
+# Copyright (C) 2017 Paul Roub
+# Copyright (C) 2017-2019 Antonio Larrosa
+# Copyright (C) 2018 Vishal Choudhary
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -16,6 +30,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
+
 
 from functools import partial
 import os
@@ -44,29 +59,36 @@ from picard.track import Track
 from picard.util import imageinfo
 from picard.util.lrucache import LRUCache
 
+from picard.ui.widgets import ActiveLabel
 
-class ActiveLabel(QtWidgets.QLabel):
-    """Clickable QLabel."""
 
-    clicked = QtCore.pyqtSignal()
+class CoverArtThumbnail(ActiveLabel):
     image_dropped = QtCore.pyqtSignal(QtCore.QUrl, bytes)
 
-    def __init__(self, active=True, drops=False, *args):
-        super().__init__(*args)
+    def __init__(self, active=False, drops=False, pixmap_cache=None, *args, **kwargs):
+        super().__init__(active, drops, *args, **kwargs)
+        self.data = None
+        self.has_common_images = None
+        self.shadow = QtGui.QPixmap(":/images/CoverArtShadow.png")
+        self.pixel_ratio = self.tagger.primaryScreen().devicePixelRatio()
+        w, h = self.scaled(128, 128)
+        self.shadow = self.shadow.scaled(w, h, QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation)
+        self.shadow.setDevicePixelRatio(self.pixel_ratio)
+        self.release = None
+        self.setPixmap(self.shadow)
+        self.setAlignment(QtCore.Qt.AlignTop | QtCore.Qt.AlignHCenter)
         self.setMargin(0)
-        self.setActive(active)
         self.setAcceptDrops(drops)
+        self.clicked.connect(self.open_release_page)
+        self.related_images = []
+        self._pixmap_cache = pixmap_cache
+        self.current_pixmap_key = None
 
-    def setActive(self, active):
-        self.active = active
-        if self.active:
-            self.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+    def __eq__(self, other):
+        if len(self.data) or len(other.data):
+            return self.current_pixmap_key == other.current_pixmap_key
         else:
-            self.setCursor(QtGui.QCursor())
-
-    def mouseReleaseEvent(self, event):
-        if self.active and event.button() == QtCore.Qt.LeftButton:
-            self.clicked.emit()
+            return True
 
     @staticmethod
     def dragEnterEvent(event):
@@ -112,32 +134,6 @@ class ActiveLabel(QtWidgets.QLabel):
 
         if accepted:
             event.acceptProposedAction()
-
-
-class CoverArtThumbnail(ActiveLabel):
-
-    def __init__(self, active=False, drops=False, pixmap_cache=None, *args, **kwargs):
-        super().__init__(active, drops, *args, **kwargs)
-        self.data = None
-        self.has_common_images = None
-        self.shadow = QtGui.QPixmap(":/images/CoverArtShadow.png")
-        self.pixel_ratio = self.tagger.primaryScreen().devicePixelRatio()
-        w, h = self.scaled(128, 128)
-        self.shadow = self.shadow.scaled(w, h, QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation)
-        self.shadow.setDevicePixelRatio(self.pixel_ratio)
-        self.release = None
-        self.setPixmap(self.shadow)
-        self.setAlignment(QtCore.Qt.AlignTop | QtCore.Qt.AlignHCenter)
-        self.clicked.connect(self.open_release_page)
-        self.related_images = []
-        self._pixmap_cache = pixmap_cache
-        self.current_pixmap_key = None
-
-    def __eq__(self, other):
-        if len(self.data) or len(other.data):
-            return self.current_pixmap_key == other.current_pixmap_key
-        else:
-            return True
 
     def scaled(self, *dimensions):
         return (self.pixel_ratio * dimension for dimension in dimensions)
@@ -518,6 +514,17 @@ class CoverArtBox(QtWidgets.QGroupBox):
             self.cover_art.set_metadata(self.item.metadata)
             self.show()
 
+    def choose_local_file(self):
+        file_chooser = QtWidgets.QFileDialog(self)
+        file_chooser.setNameFilters([
+            _("All supported image formats") + " (*.png *.jpg *.jpeg *.tif *.tiff *.gif *.pdf)",
+            _("All files") + " (*)",
+        ])
+        if file_chooser.exec_():
+            file_urls = file_chooser.selectedUrls()
+            if file_urls:
+                self.fetch_remote_image(file_urls[0])
+
     def set_load_image_behavior(self, behavior):
         config.setting["load_image_behavior"] = behavior
 
@@ -535,17 +542,28 @@ class CoverArtBox(QtWidgets.QGroupBox):
             use_orig_value_action.triggered.connect(self.item.keep_original_images)
             menu.addAction(use_orig_value_action)
 
+        if self.item and self.item.can_show_coverart:
+            name = _('Choose local file...')
+            choose_local_file_action = QtWidgets.QAction(name, self.parent)
+            choose_local_file_action.triggered.connect(self.choose_local_file)
+            menu.addAction(choose_local_file_action)
+
         if not menu.isEmpty():
             menu.addSeparator()
 
-        load_image_behavior_group = QtWidgets.QActionGroup(self.parent, exclusive=True)
-        action = load_image_behavior_group.addAction(QtWidgets.QAction(_('Replace front cover art on drop'), self.parent, checkable=True))
+        load_image_behavior_group = QtWidgets.QActionGroup(self.parent)
+        action = QtWidgets.QAction(_('Replace front cover art'), self.parent)
+        action.setCheckable(True)
         action.triggered.connect(partial(self.set_load_image_behavior, behavior='replace'))
+        load_image_behavior_group.addAction(action)
         if config.setting["load_image_behavior"] == 'replace':
             action.setChecked(True)
         menu.addAction(action)
-        action = load_image_behavior_group.addAction(QtWidgets.QAction(_('Append front cover art on drop'), self.parent, checkable=True))
+
+        action = QtWidgets.QAction(_('Append front cover art'), self.parent)
+        action.setCheckable(True)
         action.triggered.connect(partial(self.set_load_image_behavior, behavior='append'))
+        load_image_behavior_group.addAction(action)
         if config.setting["load_image_behavior"] == 'append':
             action.setChecked(True)
         menu.addAction(action)

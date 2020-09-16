@@ -1,5 +1,41 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+#
+# Picard, the next-generation MusicBrainz tagger
+#
+# Copyright (C) 2006-2008, 2011-2014, 2017 Lukáš Lalinský
+# Copyright (C) 2007 Santiago M. Mola
+# Copyright (C) 2008 Robert Kaye
+# Copyright (C) 2008-2009, 2018-2020 Philipp Wolfer
+# Copyright (C) 2009 Carlin Mangar
+# Copyright (C) 2011-2012, 2014, 2016-2018 Wieland Hoffmann
+# Copyright (C) 2011-2014 Michael Wiencek
+# Copyright (C) 2012, 2017 Frederik “Freso” S. Olesen
+# Copyright (C) 2013-2014 Johannes Dewender
+# Copyright (C) 2013-2015, 2017-2019 Laurent Monin
+# Copyright (C) 2014, 2017 Sophist-UK
+# Copyright (C) 2016 Rahul Raturi
+# Copyright (C) 2016-2017 Ville Skyttä
+# Copyright (C) 2016-2018 Sambhav Kothari
+# Copyright (C) 2018 Abhinav Ohri
+# Copyright (C) 2018 Kartik Ohri
+# Copyright (C) 2018 virusMac
+# Copyright (C) 2019 Kurt Mosiejczuk
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 2
+# of the License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
+
 
 import datetime
 from distutils import log
@@ -24,9 +60,11 @@ from setuptools.dist import Distribution
 
 from picard import (
     PICARD_APP_ID,
+    PICARD_APP_NAME,
     PICARD_DESKTOP_NAME,
+    PICARD_DISPLAY_NAME,
     PICARD_VERSION,
-    __version__,
+    PICARD_VERSION_STR_SHORT,
 )
 
 
@@ -230,21 +268,29 @@ class picard_build(build):
             file_version = PICARD_VERSION[0:3] + (self.build_number,)
             file_version_str = '.'.join([str(v) for v in file_version])
 
-            # Temporarily setting it to this value to generate a nice name for Windows app
-            args['name'] = 'MusicBrainz Picard'
-            args['file_version'] = file_version_str
+            installer_args = {
+                'display-name': PICARD_DISPLAY_NAME,
+                'file-version': file_version_str,
+            }
             if os.path.isfile('installer/picard-setup.nsi.in'):
-                generate_file('installer/picard-setup.nsi.in', 'installer/picard-setup.nsi', args)
+                generate_file('installer/picard-setup.nsi.in', 'installer/picard-setup.nsi', {**args, **installer_args})
+                log.info('generating NSIS translation files')
+                self.spawn(['python', 'installer/i18n/json2nsh.py'])
+
             version_args = {
                 'filevers': str(file_version),
                 'prodvers': str(file_version),
             }
             generate_file('win-version-info.txt.in', 'win-version-info.txt', {**args, **version_args})
-            args['name'] = 'picard'
 
+            default_publisher = 'CN=Metabrainz Foundation Inc., O=Metabrainz Foundation Inc., L=San Luis Obispo, S=California, C=US'
+            store_version = (PICARD_VERSION.major, PICARD_VERSION.minor, PICARD_VERSION.patch * 10000 + self.build_number, 0)
             generate_file('appxmanifest.xml.in', 'appxmanifest.xml', {
-                'app-id': PICARD_APP_ID,
-                'version': file_version_str
+                'app-id': "MetaBrainzFoundationInc." + PICARD_APP_ID,
+                'display-name': PICARD_DISPLAY_NAME,
+                'short-name': PICARD_APP_NAME,
+                'publisher': os.environ.get('PICARD_APPX_PUBLISHER', default_publisher),
+                'version': '.'.join([str(v) for v in store_version]),
             })
         elif sys.platform == 'linux':
             self.run_command('build_appdata')
@@ -426,7 +472,7 @@ class picard_regen_appdata_pot_file(Command):
             ])
 
 
-class picard_get_po_files(Command):
+class picard_pull_translations(Command):
     description = "Retrieve po files from transifex"
     minimum_perc_default = 5
     user_options = [
@@ -567,6 +613,7 @@ class picard_update_constants(Command):
             'DB:medium_format/name',
             'DB:release_group_primary_type/name',
             'DB:release_group_secondary_type/name',
+            'DB:release_status/name',
         )
         with open(attributes_potfile, 'rb') as f:
             log.info('Parsing %s' % attributes_potfile)
@@ -591,7 +638,7 @@ class picard_update_constants(Command):
         line = "    '{code}': '{name}',\n"
         footer = "}}\n"
         filename = os.path.join('picard', 'const', 'countries.py')
-        with open(filename, 'w') as countries_py:
+        with open(filename, 'w', encoding='utf-8') as countries_py:
             def write(s, **kwargs):
                 countries_py.write(s.format(**kwargs))
 
@@ -611,7 +658,7 @@ class picard_update_constants(Command):
         line = "    '{key}': '{value}',\n"
         footer = "}}\n"
         filename = os.path.join('picard', 'const', 'attributes.py')
-        with open(filename, 'w') as attributes_py:
+        with open(filename, 'w', encoding='utf-8') as attributes_py:
             def write(s, **kwargs):
                 attributes_py.write(s.format(**kwargs))
 
@@ -698,7 +745,7 @@ with open(os.path.join(this_directory, 'README.md'), encoding='utf-8') as f:
 
 args = {
     'name': PACKAGE_NAME,
-    'version': __version__,
+    'version': PICARD_VERSION_STR_SHORT,
     'description': 'The next generation MusicBrainz tagger',
     'keywords': 'MusicBrainz metadata tagger picard',
     'long_description': long_description,
@@ -720,12 +767,12 @@ args = {
         'install': picard_install,
         'install_locales': picard_install_locales,
         'update_constants': picard_update_constants,
-        'get_po_files': picard_get_po_files,
+        'pull_translations': picard_pull_translations,
         'regen_pot_file': picard_regen_pot_file,
         'patch_version': picard_patch_version,
     },
     'scripts': ['scripts/' + PACKAGE_NAME],
-    'install_requires': ['PyQt5', 'mutagen'],
+    'install_requires': ['PyQt5', 'mutagen', 'python-dateutil'],
     'classifiers': [
         'License :: OSI Approved :: GNU General Public License v2 or later (GPLv2+)',
         'Development Status :: 5 - Production/Stable',

@@ -1,7 +1,11 @@
 # -*- coding: utf-8 -*-
 #
 # Picard, the next-generation MusicBrainz tagger
-# Copyright (C) 2013 Laurent Monin
+#
+# Copyright (C) 2013-2015 Laurent Monin
+# Copyright (C) 2017 Sambhav Kothari
+# Copyright (C) 2018 Wieland Hoffmann
+# Copyright (C) 2019 Philipp Wolfer
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -17,8 +21,8 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 
+
 from picard.const import MB_ATTRIBUTES
-from picard.i18n import gettext_attr
 
 
 # list of types from http://musicbrainz.org/doc/Cover_Art/Types
@@ -41,4 +45,4 @@ def translate_caa_type(name):
         return _(CAA_TYPES_TR[name])
     else:
         title = CAA_TYPES_TR.get(name, name)
-        return gettext_attr(title, "cover_art_type")
+        return pgettext_attributes("cover_art_type", title)

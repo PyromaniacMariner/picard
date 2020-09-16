@@ -1,7 +1,28 @@
+# -*- coding: utf-8 -*-
+#
+# Picard, the next-generation MusicBrainz tagger
+#
+# Copyright (C) 2018-2020 Philipp Wolfer
+# Copyright (C) 2019-2020 Laurent Monin
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 2
+# of the License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
+
+
 import os
-import shutil
-from tempfile import mkdtemp
 import unittest
+from unittest.mock import MagicMock
 
 from test.picardtestcase import PicardTestCase
 
@@ -14,17 +35,11 @@ from picard.file import File
 from picard.metadata import Metadata
 
 
-def is_macos_10_14():
-    if IS_MACOS:
-        import platform
-        return platform.mac_ver()[0].startswith('10.14')
-    return False
-
-
 class DataObjectTest(PicardTestCase):
 
     def setUp(self):
         super().setUp()
+        self.tagger.acoustidmanager = MagicMock()
         self.file = File('somepath/somefile.mp3')
 
     def test_filename(self):
@@ -45,17 +60,41 @@ class DataObjectTest(PicardTestCase):
         self.file.metadata['discnumber'] = 'FOURTYTWO'
         self.assertEqual(0, self.file.discnumber)
 
+    def test_set_acoustid_fingerprint(self):
+        fingerprint = 'foo'
+        length = 36
+        self.file.set_acoustid_fingerprint(fingerprint, length)
+        self.assertEqual(fingerprint, self.file.acoustid_fingerprint)
+        self.assertEqual(length, self.file.acoustid_length)
+        self.tagger.acoustidmanager.add.assert_called_with(self.file, None)
+        self.tagger.acoustidmanager.add.reset_mock()
+        self.file.set_acoustid_fingerprint(fingerprint, length)
+        self.tagger.acoustidmanager.add.assert_not_called()
+        self.tagger.acoustidmanager.remove.assert_not_called()
+
+    def test_set_acoustid_fingerprint_no_length(self):
+        self.file.metadata.length = 42000
+        fingerprint = 'foo'
+        self.file.set_acoustid_fingerprint(fingerprint)
+        self.assertEqual(fingerprint, self.file.acoustid_fingerprint)
+        self.assertEqual(42, self.file.acoustid_length)
+
+    def test_set_acoustid_fingerprint_unset(self):
+        self.file.acoustid_fingerprint = 'foo'
+        self.file.set_acoustid_fingerprint(None, 42)
+        self.tagger.acoustidmanager.add.assert_not_called()
+        self.tagger.acoustidmanager.remove.assert_called_with(self.file)
+        self.assertEqual(None, self.file.acoustid_fingerprint)
+        self.assertEqual(0, self.file.acoustid_length)
+
 
 class TestPreserveTimes(PicardTestCase):
 
     def setUp(self):
         super().setUp()
-        self.tmp_directory = mkdtemp()
+        self.tmp_directory = self.mktmpdir()
         filepath = os.path.join(self.tmp_directory, 'a.mp3')
         self.file = File(filepath)
-
-    def tearDown(self):
-        shutil.rmtree(self.tmp_directory)
 
     def _create_testfile(self):
         # create a dummy file
@@ -81,25 +120,26 @@ class TestPreserveTimes(PicardTestCase):
         # test if times are preserved
         (before_atime_ns, before_mtime_ns) = self.file._preserve_times(self.file.filename, self._modify_testfile)
 
-        # HERE an external access to the file is possible, modifying its access time
+        # HERE an external access to the file is possible, modifying its access time
 
-        # read times again and compare with original
+        # read times again and compare with original
         st = os.stat(self.file.filename)
         (after_atime_ns, after_mtime_ns) = (st.st_atime_ns, st.st_mtime_ns)
 
-        # on macOS 10.14 os.utime only sets the times with second precision
-        # see https://tickets.metabrainz.org/browse/PICARD-1516
-        if is_macos_10_14():
+        # on macOS 10.14 and later os.utime only sets the times with second
+        # precision see https://tickets.metabrainz.org/browse/PICARD-1516.
+        # This also seems to depend on the Python build being used.
+        if IS_MACOS:
             before_atime_ns //= 1000
             before_mtime_ns //= 1000
             after_atime_ns //= 1000
             after_mtime_ns //= 1000
 
-        # modification times should be equal
+        # modification times should be equal
         self.assertEqual(before_mtime_ns, after_mtime_ns)
 
         # access times may not be equal
-        # time difference should be positive and reasonably low (if no access in between, it should be 0)
+        # time difference should be positive and reasonably low (if no access in between, it should be 0)
         delta = after_atime_ns - before_atime_ns
         tolerance = 10**7  #  0.01 seconds
         self.assertTrue(0 <= delta < tolerance, "0 <= %s < %s" % (delta, tolerance))

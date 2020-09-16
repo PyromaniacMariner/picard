@@ -1,7 +1,12 @@
 # -*- coding: utf-8 -*-
 #
 # Picard, the next-generation MusicBrainz tagger
+#
 # Copyright (C) 2011 Lukáš Lalinský
+# Copyright (C) 2017 Sambhav Kothari
+# Copyright (C) 2018 Laurent Monin
+# Copyright (C) 2018 Vishal Choudhary
+# Copyright (C) 2020 Philipp Wolfer
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -16,6 +21,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
+
 
 from functools import partial
 
@@ -37,14 +43,18 @@ class Submission(object):
 
 class AcoustIDManager(QtCore.QObject):
 
-    def __init__(self):
+    # AcoustID has a post limit of around 1 MB. With the data submitted by
+    # Picard this is roughly around 250 fingerprints. Submit a few less to have
+    # some leeway.
+    BATCH_SUBMIT_COUNT = 240
+
+    def __init__(self, acoustid_api):
         super().__init__()
         self._fingerprints = {}
+        self._acoustid_api = acoustid_api
 
     def add(self, file, recordingid):
-        if not hasattr(file, 'acoustid_fingerprint'):
-            return
-        if not hasattr(file, 'acoustid_length'):
+        if not file.acoustid_fingerprint or not file.acoustid_length:
             return
         puid = file.metadata['musicip_puid']
         self._fingerprints[file] = Submission(file.acoustid_fingerprint, file.acoustid_length, recordingid, recordingid, puid)
@@ -62,29 +72,53 @@ class AcoustIDManager(QtCore.QObject):
             del self._fingerprints[file]
         self._check_unsubmitted()
 
+    def is_submitted(self, file):
+        submission = self._fingerprints.get(file)
+        if submission:
+            return not submission.recordingid or submission.orig_recordingid == submission.recordingid
+        return True
+
     def _unsubmitted(self):
-        for submission in self._fingerprints.values():
+        for file, submission in self._fingerprints.items():
             if submission.recordingid and submission.orig_recordingid != submission.recordingid:
-                yield submission
+                yield (file, submission)
 
     def _check_unsubmitted(self):
         enabled = next(self._unsubmitted(), None) is not None
         self.tagger.window.enable_submit(enabled)
 
     def submit(self):
-        fingerprints = list(self._unsubmitted())
-        if not fingerprints:
+        submissions = list(self._unsubmitted())
+        if not submissions:
             self._check_unsubmitted()
             return
-        log.debug("AcoustID: submitting ...")
+        log.debug("AcoustID: submitting total of %d fingerprints...", len(submissions))
+        self._batch_submit(submissions)
+
+    def _batch_submit(self, submissions):
+        if not submissions:  # All fingerprints submitted, nothing to do
+            log.debug("AcoustID: submitted all fingerprints")
+            self.tagger.window.set_statusbar_message(
+                N_('AcoustIDs successfully submitted.'),
+                echo=None,
+                timeout=3000
+            )
+            self._check_unsubmitted()
+            return
+        submission_batch = submissions[:self.BATCH_SUBMIT_COUNT]
+        submissions = submissions[self.BATCH_SUBMIT_COUNT:]
+        fingerprints = [fingerprint for file_, fingerprint in submission_batch]
+        log.debug("AcoustID: submitting batch of %d fingerprints (%d remaining)...",
+            len(submission_batch), len(submissions))
         self.tagger.window.set_statusbar_message(
             N_('Submitting AcoustIDs ...'),
             echo=None
         )
-        self.tagger.acoustid_api.submit_acoustid_fingerprints(fingerprints,
-            partial(self.__fingerprint_submission_finished, fingerprints))
+        next_func = partial(self._batch_submit, submissions)
+        self._acoustid_api.submit_acoustid_fingerprints(fingerprints,
+            partial(self._batch_submit_finished, submission_batch, next_func))
 
-    def __fingerprint_submission_finished(self, fingerprints, document, http, error):
+    def _batch_submit_finished(self, submissions, next_func, document, http, error):
         if error:
             try:
                 error = load_json(document)
@@ -105,12 +139,9 @@ class AcoustIDManager(QtCore.QObject):
                 timeout=3000
             )
         else:
-            log.debug('AcoustID: successfully submitted')
-            self.tagger.window.set_statusbar_message(
-                N_('AcoustIDs successfully submitted.'),
-                echo=None,
-                timeout=3000
-            )
-            for submission in fingerprints:
+            log.debug('AcoustID: %d fingerprints successfully submitted', len(submissions))
+            for file, submission in submissions:
                 submission.orig_recordingid = submission.recordingid
+                file.update()
             self._check_unsubmitted()
+        next_func()

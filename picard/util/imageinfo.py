@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 #
 # Picard, the next-generation MusicBrainz tagger
-# Copyright (C) 2014 Laurent Monin
+#
+# Copyright (C) 2014, 2018, 2020 Laurent Monin
+# Copyright (C) 2017 Sambhav Kothari
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -16,6 +18,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
+
 
 from io import BytesIO
 import struct
@@ -61,7 +64,7 @@ def identify(data):
     mime = ''
     extension = ''
 
-    # http://en.wikipedia.org/wiki/Graphics_Interchange_Format
+    # http://en.wikipedia.org/wiki/Graphics_Interchange_Format
     if data[:6] in (b'GIF87a', b'GIF89a'):
         w, h = struct.unpack('<HH', data[6:10])
         mime = 'image/gif'
@@ -74,7 +77,7 @@ def identify(data):
         mime = 'image/png'
         extension = '.png'
 
-    # http://en.wikipedia.org/wiki/JPEG
+    # http://en.wikipedia.org/wiki/JPEG
     elif data[:2] == b'\xFF\xD8':  # Start Of Image (SOI) marker
         jpeg = BytesIO(data)
         # skip SOI
@@ -106,7 +109,7 @@ def identify(data):
             pass
 
     # PDF
-    elif data[:4] == '%PDF':
+    elif data[:4] == b'%PDF':
         h, w = 0, 0
         mime = 'application/pdf'
         extension = '.pdf'

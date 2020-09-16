@@ -1,4 +1,32 @@
 # -*- coding: utf-8 -*-
+#
+# Picard, the next-generation MusicBrainz tagger
+#
+# Copyright (C) 2006-2007 Lukáš Lalinský
+# Copyright (C) 2010 fatih
+# Copyright (C) 2010-2011, 2014, 2018-2019 Philipp Wolfer
+# Copyright (C) 2012, 2014, 2018 Wieland Hoffmann
+# Copyright (C) 2013 Ionuț Ciocîrlan
+# Copyright (C) 2013-2014, 2018-2020 Laurent Monin
+# Copyright (C) 2014, 2017 Sophist-UK
+# Copyright (C) 2016 Frederik “Freso” S. Olesen
+# Copyright (C) 2017 Sambhav Kothari
+# Copyright (C) 2017 Shen-Ta Hsieh
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 2
+# of the License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
+
 
 import builtins
 from collections import namedtuple
@@ -10,8 +38,10 @@ from test.picardtestcase import PicardTestCase
 from picard import util
 from picard.const.sys import IS_WIN
 from picard.util import (
+    extract_year_from_date,
     find_best_match,
     imageinfo,
+    limited_join,
     sort_by_similarity,
 )
 
@@ -48,6 +78,25 @@ class ReplaceWin32IncompatTest(PicardTestCase):
                              "c:\\test\\te\"st2")
 
 
+class ExtractYearTest(PicardTestCase):
+    def test_string(self):
+        self.assertEqual(extract_year_from_date(""), None)
+        self.assertEqual(extract_year_from_date(2020), None)
+        self.assertEqual(extract_year_from_date("2020"), 2020)
+        self.assertEqual(extract_year_from_date('2020-02-28'), 2020)
+        self.assertEqual(extract_year_from_date('2015.02'), 2015)
+        self.assertEqual(extract_year_from_date('2015; 2015'), None)
+        # test for the format as supported by ID3 (https://id3.org/id3v2.4.0-structure): yyyy-MM-ddTHH:mm:ss
+        self.assertEqual(extract_year_from_date('2020-07-21T13:00:00'), 2020)
+
+    def test_mapping(self):
+        self.assertEqual(extract_year_from_date({}), None)
+        self.assertEqual(extract_year_from_date({'year': 'abc'}), None)
+        self.assertEqual(extract_year_from_date({'year': '2020'}), 2020)
+        self.assertEqual(extract_year_from_date({'year': 2020}), 2020)
+        self.assertEqual(extract_year_from_date({'year': '2020-02-28'}), None)
+
+
 class SanitizeDateTest(PicardTestCase):
 
     def test_correct(self):
@@ -63,26 +112,42 @@ class SanitizeDateTest(PicardTestCase):
         self.assertNotEqual(util.sanitize_date("2006.03.02"), "2006-03-02")
 
 
+class SanitizeFilenameTest(PicardTestCase):
+
+    def test_replace_slashes(self):
+        self.assertEqual(util.sanitize_filename("AC/DC"), "AC_DC")
+
+    def test_custom_replacement(self):
+        self.assertEqual(util.sanitize_filename("AC/DC", "|"), "AC|DC")
+
+    def test_win_compat(self):
+        self.assertEqual(util.sanitize_filename("AC\\/DC", win_compat=True), "AC__DC")
+
+    @unittest.skipUnless(IS_WIN, "windows test")
+    def test_replace_backslashes(self):
+        self.assertEqual(util.sanitize_filename("AC\\DC"), "AC_DC")
+
+    @unittest.skipIf(IS_WIN, "non-windows test")
+    def test_keep_backslashes(self):
+        self.assertEqual(util.sanitize_filename("AC\\DC"), "AC\\DC")
+
+
 class TranslateArtistTest(PicardTestCase):
 
     def test_latin(self):
-        self.assertEqual(u"Jean Michel Jarre", util.translate_from_sortname(u"Jean Michel Jarre", u"Jarre, Jean Michel"))
-        self.assertNotEqual(u"Jarre, Jean Michel", util.translate_from_sortname(u"Jean Michel Jarre", u"Jarre, Jean Michel"))
+        self.assertEqual("thename", util.translate_from_sortname("thename", "sort, name"))
 
     def test_kanji(self):
-        self.assertEqual(u"Tetsuya Komuro", util.translate_from_sortname(u"小室哲哉", u"Komuro, Tetsuya"))
-        self.assertNotEqual(u"Komuro, Tetsuya", util.translate_from_sortname(u"小室哲哉", u"Komuro, Tetsuya"))
-        self.assertNotEqual(u"小室哲哉", util.translate_from_sortname(u"小室哲哉", u"Komuro, Tetsuya"))
+        self.assertEqual("Tetsuya Komuro", util.translate_from_sortname("小室哲哉", "Komuro, Tetsuya"))
+        # see _reverse_sortname(), cases with 3 or 4 chunks
+        self.assertEqual("c b a", util.translate_from_sortname("小室哲哉", "a, b, c"))
+        self.assertEqual("b a, d c", util.translate_from_sortname("小室哲哉", "a, b, c, d"))
 
     def test_kanji2(self):
-        self.assertEqual(u"Ayumi Hamasaki & Keiko", util.translate_from_sortname(u"浜崎あゆみ & KEIKO", u"Hamasaki, Ayumi & Keiko"))
-        self.assertNotEqual(u"浜崎あゆみ & KEIKO", util.translate_from_sortname(u"浜崎あゆみ & KEIKO", u"Hamasaki, Ayumi & Keiko"))
-        self.assertNotEqual(u"Hamasaki, Ayumi & Keiko", util.translate_from_sortname(u"浜崎あゆみ & KEIKO", u"Hamasaki, Ayumi & Keiko"))
+        self.assertEqual("Ayumi Hamasaki & Keiko", util.translate_from_sortname("浜崎あゆみ & KEIKO", "Hamasaki, Ayumi & Keiko"))
 
     def test_cyrillic(self):
-        self.assertEqual(U"Pyotr Ilyich Tchaikovsky", util.translate_from_sortname(u"Пётр Ильич Чайковский", u"Tchaikovsky, Pyotr Ilyich"))
-        self.assertNotEqual(u"Tchaikovsky, Pyotr Ilyich", util.translate_from_sortname(u"Пётр Ильич Чайковский", u"Tchaikovsky, Pyotr Ilyich"))
-        self.assertNotEqual(u"Пётр Ильич Чайковский", util.translate_from_sortname(u"Пётр Ильич Чайковский", u"Tchaikovsky, Pyotr Ilyich"))
+        self.assertEqual("Pyotr Ilyich Tchaikovsky", util.translate_from_sortname("Пётр Ильич Чайковский", "Tchaikovsky, Pyotr Ilyich"))
 
 
 class FormatTimeTest(PicardTestCase):
@@ -114,6 +179,7 @@ class TagsTest(PicardTestCase):
         self.assertEqual(dtn('tag'), 'tag')
         self.assertEqual(dtn('tag:desc'), 'tag [desc]')
         self.assertEqual(dtn('tag:'), 'tag')
+        self.assertEqual(dtn('tag:de:sc'), 'tag [de:sc]')
         self.assertEqual(dtn('originalyear'), 'Original Year')
         self.assertEqual(dtn('originalyear:desc'), 'Original Year [desc]')
         self.assertEqual(dtn('~length'), 'Length')
@@ -172,10 +238,12 @@ class AlbumArtistFromPathTest(PicardTestCase):
         file_2 = r"/10cc - Original Soundtrack/02 I'm Not in Love.mp3"
         file_3 = r"/Original Soundtrack/02 I'm Not in Love.mp3"
         file_4 = r"/02 I'm Not in Love.mp3"
+        file_5 = r"/10cc - Original Soundtrack - bonus/02 I'm Not in Love.mp3"
         self.assertEqual(aafp(file_1, '', ''), ('Original Soundtrack', '10cc'))
         self.assertEqual(aafp(file_2, '', ''), ('Original Soundtrack', '10cc'))
         self.assertEqual(aafp(file_3, '', ''), ('Original Soundtrack', ''))
         self.assertEqual(aafp(file_4, '', ''), ('', ''))
+        self.assertEqual(aafp(file_5, '', ''), ('Original Soundtrack - bonus', '10cc'))
         self.assertEqual(aafp(file_1, 'album', ''), ('album', ''))
         self.assertEqual(aafp(file_2, 'album', ''), ('album', ''))
         self.assertEqual(aafp(file_3, 'album', ''), ('album', ''))
@@ -188,6 +256,13 @@ class AlbumArtistFromPathTest(PicardTestCase):
         self.assertEqual(aafp(file_2, 'album', 'artist'), ('album', 'artist'))
         self.assertEqual(aafp(file_3, 'album', 'artist'), ('album', 'artist'))
         self.assertEqual(aafp(file_4, 'album', 'artist'), ('album', 'artist'))
+        for name in ('', 'x', '/', '\\', '///'):
+            self.assertEqual(aafp(name, '', 'artist'), ('', 'artist'))
+        # test Strip disc subdirectory
+        self.assertEqual(aafp(r'/artistx/albumy/CD 1/file.flac', '', ''), ('albumy', 'artistx'))
+        self.assertEqual(aafp(r'/artistx/albumy/the DVD 23 B/file.flac', '', ''), ('albumy', 'artistx'))
+        self.assertEqual(aafp(r'/artistx/albumy/disc23/file.flac', '', ''), ('albumy', 'artistx'))
+        self.assertNotEqual(aafp(r'/artistx/albumy/disc/file.flac', '', ''), ('albumy', 'artistx'))
 
 
 class ImageInfoTest(PicardTestCase):
@@ -211,12 +286,21 @@ class ImageInfoTest(PicardTestCase):
             )
 
     def test_jpeg(self):
-        file = os.path.join('test', 'data', 'mb.jpg',)
+        file = os.path.join('test', 'data', 'mb.jpg')
 
         with open(file, 'rb') as f:
             self.assertEqual(
                 imageinfo.identify(f.read()),
                 (140, 96, 'image/jpeg', '.jpg', 8550)
+            )
+
+    def test_pdf(self):
+        file = os.path.join('test', 'data', 'mb.pdf')
+
+        with open(file, 'rb') as f:
+            self.assertEqual(
+                imageinfo.identify(f.read()),
+                (0, 0, 'application/pdf', '.pdf', 10362)
             )
 
     def test_not_enough_data(self):
@@ -238,7 +322,7 @@ class ImageInfoTest(PicardTestCase):
                           imageinfo.identify, data)
 
 
-class CompareBarcodesTest(unittest.TestCase):
+class CompareBarcodesTest(PicardTestCase):
 
     def test_same(self):
         self.assertTrue(util.compare_barcodes('0727361379704', '0727361379704'))
@@ -257,7 +341,7 @@ class CompareBarcodesTest(unittest.TestCase):
         self.assertFalse(util.compare_barcodes(None, '0727361379704'))
 
 
-class MbidValidateTest(unittest.TestCase):
+class MbidValidateTest(PicardTestCase):
 
     def test_ok(self):
         self.assertTrue(util.mbid_validate('2944824d-4c26-476f-a981-be849081942f'))
@@ -276,7 +360,7 @@ class MbidValidateTest(unittest.TestCase):
 SimMatchTest = namedtuple('SimMatchTest', 'similarity name')
 
 
-class SortBySimilarity(unittest.TestCase):
+class SortBySimilarity(PicardTestCase):
 
     def setUp(self):
         self.test_values = [
@@ -313,7 +397,7 @@ class SortBySimilarity(unittest.TestCase):
         self.assertEqual(best_match.num_results, 0)
 
 
-class GetQtEnum(unittest.TestCase):
+class GetQtEnum(PicardTestCase):
 
     def test_get_qt_enum(self):
         from PyQt5.QtCore import QStandardPaths
@@ -321,3 +405,28 @@ class GetQtEnum(unittest.TestCase):
         self.assertIn('LocateFile', values)
         self.assertIn('LocateDirectory', values)
         self.assertNotIn('DesktopLocation', values)
+
+
+class LimitedJoin(PicardTestCase):
+
+    def setUp(self):
+        self.list = [str(x) for x in range(0, 10)]
+
+    def test_1(self):
+        expected = '0+1+...+8+9'
+        result = limited_join(self.list, 5, '+', '...')
+        self.assertEqual(result, expected)
+
+    def test_2(self):
+        expected = '0+1+2+3+4+5+6+7+8+9'
+        result = limited_join(self.list, -1)
+        self.assertEqual(result, expected)
+        result = limited_join(self.list, len(self.list))
+        self.assertEqual(result, expected)
+        result = limited_join(self.list, len(self.list) + 1)
+        self.assertEqual(result, expected)
+
+    def test_3(self):
+        expected = '0,1,2,3,…,6,7,8,9'
+        result = limited_join(self.list, len(self.list) - 1, ',')
+        self.assertEqual(result, expected)

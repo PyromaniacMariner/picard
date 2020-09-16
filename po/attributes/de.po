@@ -15,13 +15,14 @@
 # Frank Matthiae <senax79@gmail.com>, 2015
 # Hans-Peter Braun <hape.braun@icloud.com>, 2017
 # happykraut, 2017
-# J L <inactive+j_rg@transifex.com>, 2018
-# J L <inactive+j_rg@transifex.com>, 2018
+# 871cf62ea721ffc486279ce0e5a0f34c_d3e66b3 <3d1fc2557ad8bc41db62b2fba21e9eae_680078>, 2018
+# 871cf62ea721ffc486279ce0e5a0f34c_d3e66b3 <3d1fc2557ad8bc41db62b2fba21e9eae_680078>, 2018
 # Jod isnotmyname <beebeebeethats3bees@aaathats3as.com>, 2017
 # happykraut, 2017
 # Leo_Verto <leotheverto@googlemail.com>, 2017
 # Leo_Verto <leotheverto@googlemail.com>, 2017
 # Marc Rodrigues <info@sustain-release.de>, 2019
+# Mark Spike, 2019
 # Mineo <email address hidden>, 2011
 # Wieland Hoffmann <themineo+transifex@googlemail.com>, 2011
 # nikki, 2013-2014
@@ -30,7 +31,7 @@
 # Nikolai Prokoschenko <nikolai@prokoschenko.de>, 2011
 # nikki, 2013
 # Patrick <patrick.rein@gmail.com>, 2015
-# Philipp Wolfer <ph.wolfer@gmail.com>, 2012,2018-2019
+# Philipp Wolfer <ph.wolfer@gmail.com>, 2012,2018-2020
 # Philipp Wolfer <ph.wolfer@gmail.com>, 2012
 # S.Brandt <s.brandt@mixxx.org>, 2014-2016
 # Shepard, 2011
@@ -40,13 +41,14 @@
 # TL, 2015-2016
 # Tobias Quathamer <email address hidden>, 2007
 # Tobias Quathamer <toddy@debian.org>, 2007
+# palim <ueblesurmeli-transifex@yahoo.de>, 2020
 # Ulrich Klauer <ulrich@chirlu.de>, 2015-2016
 # Wieland Hoffmann <themineo+transifex@googlemail.com>, 2011
 msgid ""
 msgstr ""
 "Project-Id-Version: MusicBrainz\n"
-"PO-Revision-Date: 2019-10-27 10:29+0000\n"
-"Last-Translator: David Kellner <kellnerd@gmx.net>\n"
+"PO-Revision-Date: 2020-09-03 17:21+0000\n"
+"Last-Translator: Michael Wiencek <mwtuea@gmail.com>\n"
 "Language-Team: German (http://www.transifex.com/musicbrainz/musicbrainz/language/de/)\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
@@ -443,15 +445,50 @@ msgctxt "work_attribute_type_allowed_value"
 msgid "A-sharp minor"
 msgstr "ais-Moll"
 
+#: DB:work_attribute_type/name:44
+msgctxt "work_attribute_type"
+msgid "ACAM ID"
+msgstr ""
+
+#: DB:work_attribute_type/name:47
+msgctxt "work_attribute_type"
+msgid "ACDAM ID"
+msgstr ""
+
+#: DB:work_attribute_type/name:43
+msgctxt "work_attribute_type"
+msgid "AGADU ID"
+msgstr ""
+
 #: DB:work_attribute_type/name:23
 msgctxt "work_attribute_type"
 msgid "AKM ID"
+msgstr "AKM-ID"
+
+#: DB:work_attribute_type/name:38
+msgctxt "work_attribute_type"
+msgid "AMRA ID"
+msgstr ""
+
+#: DB:work_attribute_type/name:46
+msgctxt "work_attribute_type"
+msgid "APA ID"
+msgstr ""
+
+#: DB:work_attribute_type/name:41
+msgctxt "work_attribute_type"
+msgid "APDAYC ID"
 msgstr ""
 
 #: DB:work_attribute_type/name:13
 msgctxt "work_attribute_type"
 msgid "APRA ID"
 msgstr "APRA-ID"
+
+#: DB:work_attribute_type/name:48
+msgctxt "work_attribute_type"
+msgid "ARTISJUS ID"
+msgstr ""
 
 #: DB:work_attribute_type/name:6
 msgctxt "work_attribute_type"
@@ -1234,7 +1271,7 @@ msgstr "Blu-ray"
 #: DB:medium_format/name:79
 msgctxt "medium_format"
 msgid "Blu-ray-R"
-msgstr ""
+msgstr "Blu-ray-R"
 
 #: DB:medium_format/name:35
 msgctxt "medium_format"
@@ -1417,6 +1454,11 @@ msgctxt "medium_format"
 msgid "CED"
 msgstr "CED"
 
+#: DB:work_attribute_type/name:45
+msgctxt "work_attribute_type"
+msgid "COMPASS ID"
+msgstr ""
+
 #: DB:work_attribute_type_allowed_value/value:63
 msgctxt "work_attribute_type_allowed_value"
 msgid "Cakravākaṁ"
@@ -1593,7 +1635,7 @@ msgctxt "area_type"
 msgid ""
 "Country is used for areas included (or previously included) in ISO 3166-1, "
 "e.g. United States."
-msgstr "Land wird für Gebiete verwendet, die in ISO 3166-1 enthalten sind (oder zuvor enthalten waren), z.B. die Vereinigten Staaten."
+msgstr "Land wird für Gebiete verwendet, die in ISO 3166-1 enthalten sind (oder zuvor enthalten waren), z. B. die Vereinigten Staaten."
 
 #: DB:area_type/name:7
 msgctxt "area_type"
@@ -1607,7 +1649,7 @@ msgid ""
 "not the main administrative divisions but are also not municipalities, e.g. "
 "counties in the USA. These are not considered when displaying the parent "
 "areas for a given area."
-msgstr "Kreis wird für kleinere Verwaltungseinheiten eines Landes verwendet, die nicht die Hauptverwaltungseinheiten sind, aber auch keine Gemeinden, z.B. Countys in den USA, Landkreise in Deutschland oder Bezirke in Österreich und der Schweiz. Diese werden bei der Anzeige der übergeordneten Bereiche für einen bestimmten Bereich nicht berücksichtigt."
+msgstr "Kreis wird für kleinere Verwaltungseinheiten eines Landes verwendet, die nicht die Hauptverwaltungseinheiten sind, aber auch keine Gemeinden, z. B. Countys in den USA, Landkreise in Deutschland oder Bezirke in Österreich und der Schweiz. Diese werden bei der Anzeige der übergeordneten Bereiche für einen bestimmten Bereich nicht berücksichtigt."
 
 #: DB:work_attribute_type_allowed_value/value:608
 msgctxt "work_attribute_type_allowed_value"
@@ -2182,6 +2224,11 @@ msgstr "Eis-Dur"
 msgctxt "work_attribute_type_allowed_value"
 msgid "E-sharp minor"
 msgstr "eis-Moll"
+
+#: DB:work_attribute_type/name:37
+msgctxt "work_attribute_type"
+msgid "ECAD ID"
+msgstr ""
 
 #: DB:release_group_primary_type/name:3
 msgctxt "release_group_primary_type"
@@ -3098,17 +3145,108 @@ msgstr ""
 #: DB:work_attribute_type/name:29
 msgctxt "work_attribute_type"
 msgid "ICE ID"
-msgstr "ICE ID"
+msgstr "ICE-ID"
+
+#: DB:work_attribute_type/description:34
+msgctxt "work_attribute_type"
+msgid "ID assigned to a work by the British rights society PRS for Music"
+msgstr ""
+
+#: DB:work_attribute_type/description:22
+msgctxt "work_attribute_type"
+msgid ""
+"ID for rights intermediaries Christian Copyright Licensing International"
+msgstr ""
+
+#: DB:work_attribute_type/description:24
+msgctxt "work_attribute_type"
+msgid "ID for the Argentinean rights society SADAIC"
+msgstr ""
+
+#: DB:work_attribute_type/description:13
+msgctxt "work_attribute_type"
+msgid "ID for the Australasian rights society APRA"
+msgstr ""
+
+#: DB:work_attribute_type/description:23
+msgctxt "work_attribute_type"
+msgid "ID for the Austrian rights society AKM"
+msgstr ""
 
 #: DB:work_attribute_type/description:28
 msgctxt "work_attribute_type"
 msgid "ID for the Belgian rights society SABAM"
 msgstr "ID für die belgische Rechtegesellschaft SABAM"
 
+#: DB:work_attribute_type/description:37
+msgctxt "work_attribute_type"
+msgid "ID for the Brazilian rights society ECAD"
+msgstr ""
+
+#: DB:work_attribute_type/description:10
+msgctxt "work_attribute_type"
+msgid "ID for the Canadian rights society SOCAN"
+msgstr ""
+
+#: DB:work_attribute_type/description:39
+msgctxt "work_attribute_type"
+msgid "ID for the Colombian rights society SAYCO"
+msgstr ""
+
+#: DB:work_attribute_type/description:44
+msgctxt "work_attribute_type"
+msgid "ID for the Costa Rican rights society ACAM"
+msgstr ""
+
+#: DB:work_attribute_type/description:47
+msgctxt "work_attribute_type"
+msgid "ID for the Cuban rights society ACDAM"
+msgstr ""
+
+#: DB:work_attribute_type/description:25
+msgctxt "work_attribute_type"
+msgid "ID for the Czech rights society OSA"
+msgstr ""
+
+#: DB:work_attribute_type/description:26
+msgctxt "work_attribute_type"
+msgid "ID for the Dutch rights society BUMA/STEMRA"
+msgstr ""
+
+#: DB:work_attribute_type/description:40
+msgctxt "work_attribute_type"
+msgid "ID for the Ecuadorian rights society SAYCE"
+msgstr ""
+
+#: DB:work_attribute_type/description:21
+msgctxt "work_attribute_type"
+msgid "ID for the French rights society Sacem"
+msgstr ""
+
+#: DB:work_attribute_type/description:9
+msgctxt "work_attribute_type"
+msgid "ID for the German rights society GEMA"
+msgstr ""
+
+#: DB:work_attribute_type/description:19
+msgctxt "work_attribute_type"
+msgid "ID for the Hong Kong rights society CASH"
+msgstr ""
+
+#: DB:work_attribute_type/description:48
+msgctxt "work_attribute_type"
+msgid "ID for the Hungarian rights society ARTISJUS"
+msgstr ""
+
 #: DB:work_attribute_type/description:29
 msgctxt "work_attribute_type"
 msgid "ID for the International Copyright Enterprise"
 msgstr "ID für das International Copyright Enterprise"
+
+#: DB:work_attribute_type/description:36
+msgctxt "work_attribute_type"
+msgid "ID for the Italian rights society SIAE"
+msgstr ""
 
 #: DB:work_attribute_type/description:3
 msgctxt "work_attribute_type"
@@ -3120,15 +3258,90 @@ msgctxt "work_attribute_type"
 msgid "ID for the Japanese rights society NexTone"
 msgstr "ID für die japanische Rechtegesellschaft NexTone"
 
+#: DB:work_attribute_type/description:11
+msgctxt "work_attribute_type"
+msgid "ID for the Korean rights society KOMCA"
+msgstr ""
+
+#: DB:work_attribute_type/description:49
+msgctxt "work_attribute_type"
+msgid "ID for the Malaysian rights society MACP"
+msgstr ""
+
 #: DB:work_attribute_type/description:27
 msgctxt "work_attribute_type"
 msgid "ID for the Mexican rights society SACM"
 msgstr "ID für die mexikanische Rechtegesellschaft SACM"
 
+#: DB:work_attribute_type/description:46
+msgctxt "work_attribute_type"
+msgid "ID for the Paraguayan rights society APA"
+msgstr ""
+
+#: DB:work_attribute_type/description:41
+msgctxt "work_attribute_type"
+msgid "ID for the Peruvian rights society APDAYC"
+msgstr ""
+
 #: DB:work_attribute_type/description:30
 msgctxt "work_attribute_type"
 msgid "ID for the Polish rights society ZAiKS"
 msgstr "ID für die polnische Rechtegesellschaft ZAiKS"
+
+#: DB:work_attribute_type/description:35
+msgctxt "work_attribute_type"
+msgid "ID for the Portuguese rights society SPA"
+msgstr ""
+
+#: DB:work_attribute_type/description:45
+msgctxt "work_attribute_type"
+msgid "ID for the Singaporean rights society COMPASS"
+msgstr ""
+
+#: DB:work_attribute_type/description:20
+msgctxt "work_attribute_type"
+msgid "ID for the Spanish rights society SGAE"
+msgstr ""
+
+#: DB:work_attribute_type/description:18
+msgctxt "work_attribute_type"
+msgid "ID for the Swiss rights society SUISA"
+msgstr ""
+
+#: DB:work_attribute_type/description:12
+msgctxt "work_attribute_type"
+msgid "ID for the Taiwanese rights society MÜST"
+msgstr ""
+
+#: DB:work_attribute_type/description:6
+msgctxt "work_attribute_type"
+msgid "ID for the US rights society ASCAP"
+msgstr ""
+
+#: DB:work_attribute_type/description:7
+msgctxt "work_attribute_type"
+msgid "ID for the US rights society BMI"
+msgstr ""
+
+#: DB:work_attribute_type/description:8
+msgctxt "work_attribute_type"
+msgid "ID for the US rights society SESAC"
+msgstr ""
+
+#: DB:work_attribute_type/description:43
+msgctxt "work_attribute_type"
+msgid "ID for the Uruguayan rights society AGADU"
+msgstr ""
+
+#: DB:work_attribute_type/description:42
+msgctxt "work_attribute_type"
+msgid "ID for the Venezuelan rights society SACVEN"
+msgstr ""
+
+#: DB:work_attribute_type/description:38
+msgctxt "work_attribute_type"
+msgid "ID for the international (formerly US) rights society AMRA"
+msgstr ""
 
 #: DB:work_attribute_type/name:14
 msgctxt "work_attribute_type"
@@ -3238,7 +3451,7 @@ msgid ""
 "Island is used for islands and atolls which don't form subdivisions of their"
 " own, e.g. Skye. These are not considered when displaying the parent areas "
 "for a given area."
-msgstr "Insel wird für Inseln und Atolle verwendet, die keine eigenen Unterteilungen bilden, z.B. Skye. Diese werden bei der Anzeige der übergeordneten Gebiete für ein bestimmtes Gebiet nicht berücksichtigt."
+msgstr "Insel wird für Inseln und Atolle verwendet, die keine eigenen Unterteilungen bilden, z. B. Skye. Diese werden bei der Anzeige der übergeordneten Gebiete für ein bestimmtes Gebiet nicht berücksichtigt."
 
 #: DB:work_attribute_type/name:3
 msgctxt "work_attribute_type"
@@ -3879,6 +4092,11 @@ msgctxt "work_attribute_type_allowed_value"
 msgid "Longa"
 msgstr ""
 
+#: DB:work_attribute_type/name:49
+msgctxt "work_attribute_type"
+msgid "MACP ID"
+msgstr ""
+
 #: DB:work_attribute_type_allowed_value/value:963
 msgctxt "work_attribute_type_allowed_value"
 msgid "Madhmad sāraṅg"
@@ -3982,7 +4200,7 @@ msgstr "Manuell"
 #: DB:label_type/name:10
 msgctxt "label_type"
 msgid "Manufacturer"
-msgstr ""
+msgstr "Hersteller"
 
 #: DB:work_attribute_type_allowed_value/value:172
 msgctxt "work_attribute_type_allowed_value"
@@ -4097,7 +4315,7 @@ msgstr "Mevlidişerif"
 #: DB:medium_format/name:83
 msgctxt "medium_format"
 msgid "Microcassette"
-msgstr ""
+msgstr "Mikrokassette"
 
 #: DB:medium_format/name:6
 msgctxt "medium_format"
@@ -4622,7 +4840,7 @@ msgstr ""
 #: DB:work_attribute_type/name:33
 msgctxt "work_attribute_type"
 msgid "NexTone ID"
-msgstr ""
+msgstr "NexTone-ID"
 
 #: DB:work_attribute_type_allowed_value/value:471
 msgctxt "work_attribute_type_allowed_value"
@@ -4894,6 +5112,11 @@ msgctxt "work_attribute_type_allowed_value"
 msgid "Oyunhavası"
 msgstr ""
 
+#: DB:work_attribute_type/name:34
+msgctxt "work_attribute_type"
+msgid "PRS tune code"
+msgstr ""
+
 #: DB:work_attribute_type_allowed_value/value:993
 msgctxt "work_attribute_type_allowed_value"
 msgid "Pahāḍi"
@@ -5063,7 +5286,7 @@ msgstr ""
 #: DB:place_type/name:8
 msgctxt "place_type"
 msgid "Pressing plant"
-msgstr ""
+msgstr "Presswerk"
 
 #: DB:label_type/name:3
 msgctxt "label_type"
@@ -5254,7 +5477,7 @@ msgstr "Ravicandrika"
 #: DB:cover_art_archive.art_type/name:14
 msgctxt "cover_art_type"
 msgid "Raw/Unedited"
-msgstr "Original/unbearbeitet"
+msgstr "Raw/unbearbeitet"
 
 #: DB:editor_collection_type/name:12
 msgctxt "collection_type"
@@ -5492,10 +5715,25 @@ msgctxt "work_attribute_type"
 msgid "SACM ID"
 msgstr "SACM ID"
 
+#: DB:work_attribute_type/name:42
+msgctxt "work_attribute_type"
+msgid "SACVEN ID"
+msgstr ""
+
 #: DB:work_attribute_type/name:24
 msgctxt "work_attribute_type"
 msgid "SADAIC ID"
 msgstr "SADAIC ID"
+
+#: DB:work_attribute_type/name:40
+msgctxt "work_attribute_type"
+msgid "SAYCE ID"
+msgstr ""
+
+#: DB:work_attribute_type/name:39
+msgctxt "work_attribute_type"
+msgid "SAYCO ID"
+msgstr ""
 
 #: DB:medium_format/name:62
 msgctxt "medium_format"
@@ -5522,10 +5760,20 @@ msgctxt "medium_format"
 msgid "SHM-SACD"
 msgstr "SHM-SACD"
 
+#: DB:work_attribute_type/name:36
+msgctxt "work_attribute_type"
+msgid "SIAE ID"
+msgstr ""
+
 #: DB:work_attribute_type/name:10
 msgctxt "work_attribute_type"
 msgid "SOCAN ID"
 msgstr "SOCAN-ID"
+
+#: DB:work_attribute_type/name:35
+msgctxt "work_attribute_type"
+msgid "SPA ID"
+msgstr ""
 
 #: DB:work_attribute_type/name:18
 msgctxt "work_attribute_type"
@@ -6296,7 +6544,7 @@ msgid ""
 "This represents literary works written in prose, that is, written in "
 "relatively ordinary language without metrical structure (e.g. novels, short "
 "stories, essays...)."
-msgstr "Repräsentiert literarische Werke, die in Prosa geschrieben wurden, d.h. in einer relativ gewöhnlichen Sprache ohne metrische Struktur (z.B. Romane, Kurzgeschichten, Essays...)."
+msgstr "Repräsentiert literarische Werke, die in Prosa geschrieben wurden, d. h. in einer relativ gewöhnlichen Sprache ohne metrische Struktur (z. B. Romane, Kurzgeschichten, Essays, …)."
 
 #: DB:work_attribute_type_allowed_value/value:1041
 msgctxt "work_attribute_type_allowed_value"
@@ -6717,7 +6965,7 @@ msgstr "Yürüksofyan"
 #: DB:work_attribute_type/name:30
 msgctxt "work_attribute_type"
 msgid "ZAiKS ID"
-msgstr ""
+msgstr "ZAiKS-ID"
 
 #: DB:work_attribute_type_allowed_value/value:780
 msgctxt "work_attribute_type_allowed_value"

@@ -1,7 +1,12 @@
 # -*- coding: utf-8 -*-
 #
 # Picard, the next-generation MusicBrainz tagger
+#
 # Copyright (C) 2011 Lukáš Lalinský
+# Copyright (C) 2017-2018 Sambhav Kothari
+# Copyright (C) 2018 Vishal Choudhary
+# Copyright (C) 2018-2019 Laurent Monin
+# Copyright (C) 2018-2020 Philipp Wolfer
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -16,6 +21,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
+
 
 from collections import deque
 from functools import partial
@@ -33,13 +39,21 @@ from picard.const.sys import IS_FROZEN
 from picard.util import find_executable
 
 
+def get_score(node):
+    try:
+        return float(node.get('score', 1.0))
+    except (TypeError, ValueError):
+        return 1.0
+
+
 class AcoustIDClient(QtCore.QObject):
 
-    def __init__(self):
+    def __init__(self, acoustid_api):
         super().__init__()
         self._queue = deque()
         self._running = 0
         self._max_processes = 2
+        self._acoustid_api = acoustid_api
 
         # The second condition is checked because in case of a packaged build of picard
         # the temp directory that pyinstaller decompresses picard into changes on every
@@ -76,18 +90,21 @@ class AcoustIDClient(QtCore.QObject):
                 recording_list = doc['recordings'] = []
                 status = document['status']
                 if status == 'ok':
-                    results = document['results']
-                    if results:
-                        result = results[0]
-                        file.metadata['acoustid_id'] = result['id']
-                        if 'recordings' in result and result['recordings']:
-                            max_sources = max([r.get('sources', 1) for r in result['recordings']] + [1])
-                            for recording in result['recordings']:
-                                parsed_recording = parse_recording(recording)
-                                if parsed_recording is not None:
-                                    parsed_recording['score'] = recording.get('sources', 1) / max_sources * 100
-                                    recording_list.append(parsed_recording)
-                            log.debug("AcoustID: Lookup successful for '%s'", file.filename)
+                    results = document.get('results') or []
+                    for result in results:
+                        recordings = result.get('recordings') or []
+                        max_sources = max([r.get('sources', 1) for r in recordings] + [1])
+                        result_score = get_score(result)
+                        for recording in recordings:
+                            parsed_recording = parse_recording(recording)
+                            if parsed_recording is not None:
+                                # Calculate a score based on result score and sources for this
+                                # recording relative to other recordings in this result
+                                score = recording.get('sources', 1) / max_sources * 100
+                                parsed_recording['score'] = score * result_score
+                                parsed_recording['acoustid'] = result['id']
+                                recording_list.append(parsed_recording)
+                        log.debug("AcoustID: Lookup successful for '%s'", file.filename)
                 else:
                     mparms = {
                         'error': document['error']['message'],
@@ -140,15 +157,12 @@ class AcoustIDClient(QtCore.QObject):
         params = dict(meta='recordings releasegroups releases tracks compress sources')
         if result[0] == 'fingerprint':
             fp_type, fingerprint, length = result
-            file.acoustid_fingerprint = fingerprint
-            file.acoustid_length = length
-            self.tagger.acoustidmanager.add(file, None)
             params['fingerprint'] = fingerprint
             params['duration'] = str(length)
         else:
             fp_type, recordingid = result
             params['recordingid'] = recordingid
-        self.tagger.acoustid_api.query_acoustid(partial(self._on_lookup_finished, next_func, file), **params)
+        self._acoustid_api.query_acoustid(partial(self._on_lookup_finished, next_func, file), **params)
 
     def _on_fpcalc_finished(self, next_func, file, exit_code, exit_status):
         process = self.sender()
@@ -177,6 +191,9 @@ class AcoustIDClient(QtCore.QObject):
         except (json.decoder.JSONDecodeError, UnicodeDecodeError, ValueError):
             log.error("Error reading fingerprint calculator output", exc_info=True)
         finally:
+            if result and result[0] == 'fingerprint':
+                fp_type, fingerprint, length = result
+                file.set_acoustid_fingerprint(fingerprint, length)
             next_func(result)
 
     def _on_fpcalc_error(self, next_func, filename, error):
@@ -209,15 +226,25 @@ class AcoustIDClient(QtCore.QObject):
     def analyze(self, file, next_func):
         fpcalc_next = partial(self._lookup_fingerprint, next_func, file.filename)
 
-        if not config.setting["ignore_existing_acoustid_fingerprints"]:
-            # use cached fingerprint
+        fingerprint = file.acoustid_fingerprint
+        if not fingerprint and not config.setting["ignore_existing_acoustid_fingerprints"]:
+            # use cached fingerprint from file metadata
             fingerprints = file.metadata.getall('acoustid_fingerprint')
             if fingerprints:
-                length = int(file.metadata.length / 1000)
-                fpcalc_next(result=('fingerprint', fingerprints[0], length))
-                return
+                fingerprint = fingerprints[0]
+                file.set_acoustid_fingerprint(fingerprint)
+
+        # If the fingerprint already exists skip calling fpcalc
+        if fingerprint:
+            length = file.acoustid_length
+            fpcalc_next(result=('fingerprint', fingerprint, length))
+            return
+
         # calculate the fingerprint
-        task = (file, fpcalc_next)
+        self.fingerprint(file, fpcalc_next)
+
+    def fingerprint(self, file, next_func):
+        task = (file, next_func)
         self._queue.append(task)
         if self._running < self._max_processes:
             self._run_next_task()

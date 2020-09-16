@@ -1,8 +1,25 @@
 # -*- coding: utf-8 -*-
 #
 # Picard, the next-generation MusicBrainz tagger
+#
 # Copyright (C) 2004 Robert Kaye
-# Copyright (C) 2006 Lukáš Lalinský
+# Copyright (C) 2006-2007, 2011 Lukáš Lalinský
+# Copyright (C) 2008 Gary van der Merwe
+# Copyright (C) 2009 Carlin Mangar
+# Copyright (C) 2010, 2014-2015, 2018-2020 Philipp Wolfer
+# Copyright (C) 2011 Chad Wilson
+# Copyright (C) 2011 Wieland Hoffmann
+# Copyright (C) 2011-2013 Michael Wiencek
+# Copyright (C) 2014, 2017 Sophist-UK
+# Copyright (C) 2014-2015, 2018-2019 Laurent Monin
+# Copyright (C) 2016 Mark Trolley
+# Copyright (C) 2016 Rahul Raturi
+# Copyright (C) 2016 Suhas
+# Copyright (C) 2017 Antonio Larrosa
+# Copyright (C) 2017-2018 Sambhav Kothari
+# Copyright (C) 2018 Calvin Walton
+# Copyright (C) 2018 Vishal Choudhary
+# Copyright (C) 2019 Joel Lintunen
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -17,6 +34,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
+
 
 from collections import defaultdict
 from functools import partial
@@ -137,6 +155,7 @@ class Track(DataObject, Item):
 
     def add_file(self, file):
         if file not in self.linked_files:
+            track_will_expand = self.num_linked_files == 1
             self.linked_files.append(file)
             self.num_linked_files += 1
         self.update_file_metadata(file)
@@ -144,6 +163,9 @@ class Track(DataObject, Item):
         self.album._add_file(self, file)
         file.metadata_images_changed.connect(self.update_orig_metadata_images)
         run_file_post_addition_to_track_processors(self, file)
+        if track_will_expand:
+            # Files get expanded, ensure the existing item renders correctly
+            self.linked_files[0].update_item()
 
     def update_file_metadata(self, file):
         if file not in self.linked_files:
@@ -164,6 +186,8 @@ class Track(DataObject, Item):
         remove_metadata_images(self, [file])
         run_file_post_removal_from_track_processors(self, file)
         self.update()
+        if self.item.isSelected():
+            self.tagger.window.refresh_metadatabox()
 
     def update(self):
         if self.item:
@@ -202,7 +226,10 @@ class Track(DataObject, Item):
         if column == 'title':
             prefix = "%s-" % m['discnumber'] if m['discnumber'] and m['totaldiscs'] != "1" else ""
             return "%s%s  %s" % (prefix, m['tracknumber'].zfill(2), m['title'])
-        return m[column]
+        elif column in m:
+            return m[column]
+        elif self.num_linked_files == 1:
+            return self.linked_files[0].column(column)
 
     def is_video(self):
         return self.metadata['~video'] == '1'
@@ -290,6 +317,7 @@ class Track(DataObject, Item):
                 break
             name = _TRANSLATE_TAGS.get(name, name.title())
             genre.append(name)
+        genre.sort()
         join_genres = config.setting['join_genres']
         if join_genres:
             genre = [join_genres.join(genre)]

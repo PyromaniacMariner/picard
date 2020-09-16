@@ -1,8 +1,13 @@
 # -*- coding: utf-8 -*-
 #
 # Picard, the next-generation MusicBrainz tagger
+#
 # Copyright (C) 2004 Robert Kaye
 # Copyright (C) 2006 Lukáš Lalinský
+# Copyright (C) 2014 Sophist-UK
+# Copyright (C) 2014, 2018 Laurent Monin
+# Copyright (C) 2017 Sambhav Kothari
+# Copyright (C) 2018-2019 Philipp Wolfer
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -17,6 +22,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
+
 
 # This modules provides functionality for simplifying unicode strings.
 
@@ -62,7 +68,6 @@
 
 import codecs
 from functools import partial
-import re
 import unicodedata
 
 from picard.util import sanitize_filename
@@ -72,10 +77,6 @@ from picard.util import sanitize_filename
 # The translation tables for punctuation and latin combined-characters are taken from
 # http://unicode.org/repos/cldr/trunk/common/transforms/Latin-ASCII.xml
 # Various bugs and mistakes in this have been ironed out during testing.
-
-
-def _re_any(iterable):
-    return re.compile('([' + ''.join(iterable) + '])', re.UNICODE)
 
 
 _additional_compatibility = {
@@ -100,11 +101,10 @@ _additional_compatibility = {
     "\u3000": " ",  # IDEOGRAPHIC SPACE (from ‹character-fallback›)
     "\u2033": "”",  # DOUBLE PRIME
 }
-_re_additional_compatibility = _re_any(_additional_compatibility.keys())
 
 
 def unicode_simplify_compatibility(string):
-    interim = _re_additional_compatibility.sub(lambda m: _additional_compatibility[m.group(0)], string)
+    interim = ''.join(_additional_compatibility.get(c, c) for c in string)
     return unicodedata.normalize("NFKC", interim)
 
 
@@ -176,15 +176,22 @@ _simplify_punctuation = {
     "\u226B": ">>",  # MUCH GREATER-THAN
     "\u2985": "((",  # LEFT WHITE PARENTHESIS
     "\u2986": "))",  # RIGHT WHITE PARENTHESIS
+    "\u2022": "-",  # BULLET
     "\u200B": "",  # Zero Width Space
 }
-_re_simplify_punctuation = _re_any(_simplify_punctuation.keys())
-_pathsave_simplify_punctuation = {k: sanitize_filename(v) for k, v in _simplify_punctuation.items()}
 
 
-def unicode_simplify_punctuation(string, pathsave=False):
-    punctuation = _pathsave_simplify_punctuation if pathsave else _simplify_punctuation
-    return _re_simplify_punctuation.sub(lambda m: punctuation[m.group(0)], string)
+def unicode_simplify_punctuation(string, pathsave=False, win_compat=False):
+    temp = []
+    for c in string:
+        try:
+            result = _simplify_punctuation[c]
+            if c != result and pathsave:
+                result = sanitize_filename(result, win_compat=win_compat)
+        except KeyError:
+            result = c
+        temp.append(result)
+    return ''.join(temp)
 
 
 _simplify_combinations = {
@@ -412,13 +419,21 @@ _simplify_combinations = {
     "\u0185": "h",  # LATIN SMALL LETTER TONE SIX
     "\u01BE": "ts",  # LATIN LETTER TS LIGATION (see http://unicode.org/notes/tn27/)
 }
-_re_simplify_combinations = _re_any(_simplify_combinations)
-_pathsave_simplify_combinations = {k: sanitize_filename(v) for k, v in _simplify_combinations.items()}
 
 
-def unicode_simplify_combinations(string, pathsave=False):
-    combinations = _pathsave_simplify_combinations if pathsave else _simplify_combinations
-    return _re_simplify_combinations.sub(lambda m: combinations[m.group(0)], string)
+def _replace_unicode_simplify_combinations(char, pathsave, win_compat):
+    result = _simplify_combinations.get(char)
+    if result is None:
+        return char
+    elif not pathsave:
+        return result
+    else:
+        return sanitize_filename(result, win_compat=win_compat)
+
+
+def unicode_simplify_combinations(string, pathsave=False, win_compat=False):
+    return ''.join(
+        _replace_unicode_simplify_combinations(c, pathsave, win_compat) for c in string)
 
 
 def unicode_simplify_accents(string):
@@ -436,11 +451,11 @@ def unaccent(string):
     return unicode_simplify_accents(string)
 
 
-def replace_non_ascii(string, repl="_", pathsave=False):
+def replace_non_ascii(string, repl="_", pathsave=False, win_compat=False):
     """Replace non-ASCII characters from ``string`` by ``repl``."""
-    interim = unicode_simplify_combinations(string, pathsave)
+    interim = unicode_simplify_combinations(string, pathsave, win_compat)
     interim = unicode_simplify_accents(interim)
-    interim = unicode_simplify_punctuation(interim, pathsave)
+    interim = unicode_simplify_punctuation(interim, pathsave, win_compat)
     interim = unicode_simplify_compatibility(interim)
 
     def error_repl(e, repl="_"):

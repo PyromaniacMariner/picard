@@ -1,7 +1,14 @@
 # -*- coding: utf-8 -*-
 #
 # Picard, the next-generation MusicBrainz tagger
+#
 # Copyright (C) 2006 Lukáš Lalinský
+# Copyright (C) 2011-2014 Michael Wiencek
+# Copyright (C) 2012 Frederik “Freso” S. Olesen
+# Copyright (C) 2013-2015, 2018-2019 Laurent Monin
+# Copyright (C) 2016-2017 Sambhav Kothari
+# Copyright (C) 2017 Suhas
+# Copyright (C) 2018-2019 Philipp Wolfer
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -16,6 +23,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
+
 
 from locale import strxfrm
 from operator import itemgetter
@@ -33,20 +41,20 @@ from picard.const import (
     RELEASE_SECONDARY_GROUPS,
 )
 from picard.const.sys import IS_WIN
-from picard.i18n import gettext_attr
 
 from picard.ui.options import (
     OptionsPage,
     register_options_page,
 )
 from picard.ui.ui_options_releases import Ui_ReleasesOptionsPage
+from picard.ui.widgets import ClickableSlider
 
 
 _DEFAULT_SCORE = 0.5
 _release_type_scores = [(g, _DEFAULT_SCORE) for g in list(RELEASE_PRIMARY_GROUPS.keys()) + list(RELEASE_SECONDARY_GROUPS.keys())]
 
 
-class TipSlider(QtWidgets.QSlider):
+class TipSlider(ClickableSlider):
 
     _offset = QtCore.QPoint(0, -30)
     _step = 5
@@ -147,6 +155,7 @@ class ReleasesOptionsPage(OptionsPage):
     PARENT = "metadata"
     SORT_ORDER = 10
     ACTIVE = True
+    HELP_URL = '/config/options_releases.html'
 
     options = [
         config.ListOption("setting", "release_type_scores", _release_type_scores),
@@ -162,7 +171,7 @@ class ReleasesOptionsPage(OptionsPage):
         self._release_type_sliders = {}
 
         def add_slider(name, griditer, context):
-            label = gettext_attr(name, context)
+            label = pgettext_attributes(context, name)
             self._release_type_sliders[name] = \
                 ReleaseTypeScore(self.ui.type_group,
                                  self.ui.gridLayout,
@@ -175,7 +184,7 @@ class ReleasesOptionsPage(OptionsPage):
         for name in RELEASE_PRIMARY_GROUPS:
             add_slider(name, griditer, context='release_group_primary_type')
         for name in sorted(RELEASE_SECONDARY_GROUPS,
-                           key=lambda v: gettext_attr(v, 'release_group_secondary_type')):
+                           key=lambda v: pgettext_attributes('release_group_secondary_type', v)):
             add_slider(name, griditer, context='release_group_secondary_type')
 
         self.reset_preferred_types_btn = QtWidgets.QPushButton(self.ui.type_group)
@@ -255,7 +264,7 @@ class ReleasesOptionsPage(OptionsPage):
             source_list = [(c[0], gettext_countries(c[1])) for c in
                            source.items()]
         elif setting == "preferred_release_formats":
-            source_list = [(c[0], gettext_attr(c[1], "medium_format")) for c
+            source_list = [(c[0], pgettext_attributes("medium_format", c[1])) for c
                            in source.items()]
         else:
             source_list = [(c[0], _(c[1])) for c in source.items()]

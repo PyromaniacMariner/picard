@@ -1,9 +1,12 @@
 # -*- coding: utf-8 -*-
 #
 # Picard, the next-generation MusicBrainz tagger
+#
 # Copyright (C) 2007 Lukáš Lalinský
 # Copyright (C) 2009 Carlin Mangar
 # Copyright (C) 2017 Sambhav Kothari
+# Copyright (C) 2018-2019 Philipp Wolfer
+# Copyright (C) 2018-2020 Laurent Monin
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -51,10 +54,14 @@ from picard import (
     config,
     log,
 )
-from picard.const import CACHE_DIR
+from picard.const import (
+    CACHE_DIR,
+    CACHE_SIZE_IN_BYTES,
+)
 from picard.oauth import OAuthManager
 from picard.util import (
     build_qurl,
+    bytes2human,
     parse_json,
 )
 from picard.util.xml import parse_xml
@@ -259,6 +266,8 @@ class WebService(QtCore.QObject):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.manager = QtNetwork.QNetworkAccessManager()
+        self._network_accessible_changed(self.manager.networkAccessible())
+        self.manager.networkAccessibleChanged.connect(self._network_accessible_changed)
         self.oauth_manager = OAuthManager(self)
         self.set_cache()
         self.setup_proxy()
@@ -271,6 +280,15 @@ class WebService(QtCore.QObject):
         }
         self._init_queues()
         self._init_timers()
+
+    def _network_accessible_changed(self, accessible):
+        # Qt's network accessibility check sometimes fails, e.g. with VPNs on Windows.
+        # If the accessibility is reported to be not accessible, set it to
+        # unknown instead. Let's just try any request and handle the error.
+        # See https://tickets.metabrainz.org/browse/PICARD-1791
+        if accessible == QtNetwork.QNetworkAccessManager.NotAccessible:
+            self.manager.setNetworkAccessible(QtNetwork.QNetworkAccessManager.UnknownAccessibility)
+        log.debug("Network accessible requested: %s, actual: %s", accessible, self.manager.networkAccessible())
 
     def _init_queues(self):
         self._active_requests = {}
@@ -286,14 +304,17 @@ class WebService(QtCore.QObject):
         self._timer_count_pending_requests.setSingleShot(True)
         self._timer_count_pending_requests.timeout.connect(self._count_pending_requests)
 
-    def set_cache(self, cache_size_in_mb=100):
+    def set_cache(self, cache_size_in_bytes=None):
+        if cache_size_in_bytes is None:
+            cache_size_in_bytes = CACHE_SIZE_IN_BYTES
         cache = QtNetwork.QNetworkDiskCache()
         cache.setCacheDirectory(os.path.join(CACHE_DIR, 'network'))
-        cache.setMaximumCacheSize(cache_size_in_mb * 1024 * 1024)
+        cache.setMaximumCacheSize(cache_size_in_bytes)
         self.manager.setCache(cache)
-        log.debug("NetworkDiskCache dir: %r size: %s / %s",
-                  cache.cacheDirectory(), cache.cacheSize(),
-                  cache.maximumCacheSize())
+        log.debug("NetworkDiskCache dir: %r current size: %s max size: %s",
+                  cache.cacheDirectory(),
+                  bytes2human.decimal(cache.cacheSize(), l10n=False),
+                  bytes2human.decimal(cache.maximumCacheSize(), l10n=False))
 
     def setup_proxy(self):
         proxy = QtNetwork.QNetworkProxy()

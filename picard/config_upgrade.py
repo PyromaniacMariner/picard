@@ -1,7 +1,14 @@
 # -*- coding: utf-8 -*-
 #
 # Picard, the next-generation MusicBrainz tagger
-# Copyright (C) 2013-2014 Laurent Monin
+#
+# Copyright (C) 2013-2014 Michael Wiencek
+# Copyright (C) 2013-2016, 2018-2019 Laurent Monin
+# Copyright (C) 2014, 2017 Lukáš Lalinský
+# Copyright (C) 2014, 2018-2020 Philipp Wolfer
+# Copyright (C) 2015 Ohm Patel
+# Copyright (C) 2016 Suhas
+# Copyright (C) 2016-2017 Sambhav Kothari
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -89,7 +96,7 @@ def upgrade_to_v1_0_0_final_0(config, interactive=True, merge=True):
                 msgbox.setIcon(QtWidgets.QMessageBox.Question)
                 merge_button = msgbox.addButton(_('Merge'), QtWidgets.QMessageBox.AcceptRole)
                 msgbox.addButton(_('Remove'), QtWidgets.QMessageBox.DestructiveRole)
-                msgbox.exec()
+                msgbox.exec_()
                 merge = msgbox.clickedButton() == merge_button
             remove_va_file_naming_format(merge=merge)
         else:
@@ -289,6 +296,22 @@ def upgrade_to_v2_2_0_dev_4(config):
         _s["file_naming_format"] = DEFAULT_FILE_NAMING_FORMAT
 
 
+def upgrade_to_v2_4_0_beta_3(config):
+    """Convert preserved tags to list"""
+    _s = config.setting
+    opt = 'preserved_tags'
+    _s[opt] = [t.strip() for t in _s.raw_value(opt, qtype='QString').split(',')]
+
+
+def upgrade_to_v2_5_0_dev_1(config):
+    """Rename whitelist cover art provider"""
+    _s = config.setting
+    _s['ca_providers'] = [
+        ('UrlRelationships' if n == 'Whitelist' else n, s)
+        for n, s in _s['ca_providers']
+    ]
+
+
 def rename_option(config, old_opt, new_opt, option_type, default):
     _s = config.setting
     if old_opt in _s:
@@ -312,4 +335,6 @@ def upgrade_config(config):
     cfg.register_upgrade_hook(upgrade_to_v2_0_0_dev_3)
     cfg.register_upgrade_hook(upgrade_to_v2_1_0_dev_1)
     cfg.register_upgrade_hook(upgrade_to_v2_2_0_dev_3)
+    cfg.register_upgrade_hook(upgrade_to_v2_4_0_beta_3)
+    cfg.register_upgrade_hook(upgrade_to_v2_5_0_dev_1)
     cfg.run_upgrade_hooks(log.debug)

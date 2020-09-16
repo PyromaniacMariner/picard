@@ -1,9 +1,22 @@
 # -*- coding: utf-8 -*-
 #
 # Picard, the next-generation MusicBrainz tagger
-# Copyright (C) 2007 Lukáš Lalinský
+#
+# Copyright (C) 2007-2008 Lukáš Lalinský
+# Copyright (C) 2009 Carlin Mangar
+# Copyright (C) 2009, 2014, 2017-2020 Philipp Wolfer
+# Copyright (C) 2011 johnny64
+# Copyright (C) 2011-2013 Michael Wiencek
+# Copyright (C) 2013 Sebastian Ramacher
+# Copyright (C) 2013 Wieland Hoffmann
+# Copyright (C) 2013 brainz34
+# Copyright (C) 2013-2014 Sophist-UK
+# Copyright (C) 2014 Johannes Dewender
 # Copyright (C) 2014 Shadab Zafar
-# Copyright (C) 2015 Laurent Monin
+# Copyright (C) 2014-2015, 2018-2019 Laurent Monin
+# Copyright (C) 2016-2018 Sambhav Kothari
+# Copyright (C) 2017 Frederik “Freso” S. Olesen
+# Copyright (C) 2018 Vishal Choudhary
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -19,11 +32,18 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 
+
 from collections import defaultdict
+import os.path
 
 from picard import (
     config,
     log,
+)
+from picard.const import USER_PLUGIN_DIR
+from picard.version import (
+    Version,
+    VersionError,
 )
 
 
@@ -73,7 +93,7 @@ class ExtensionPoint(object):
             pass
 
     def __iter__(self):
-        enabled_plugins = config.setting["enabled_plugins"]
+        enabled_plugins = config.setting["enabled_plugins"] if config.setting else []
         for name in self.__dict:
             if name is None or name in enabled_plugins:
                 for item in self.__dict[name]:
@@ -92,7 +112,7 @@ class PluginWrapper(PluginShared):
         super().__init__()
         self.module = module
         self.compatible = False
-        self.dir = plugindir
+        self.dir = os.path.normpath(plugindir)
         self._file = file
         self.data = manifest_data or self.module.__dict__
 
@@ -127,9 +147,9 @@ class PluginWrapper(PluginShared):
     @property
     def version(self):
         try:
-            return self.data['PLUGIN_VERSION']
-        except KeyError:
-            return ""
+            return Version.from_string(self.data['PLUGIN_VERSION'])
+        except (KeyError, VersionError):
+            return Version(0, 0, 0)
 
     @property
     def api_versions(self):
@@ -163,6 +183,10 @@ class PluginWrapper(PluginShared):
     def files_list(self):
         return self.file[len(self.dir)+1:]
 
+    @property
+    def is_user_installed(self):
+        return self.dir == USER_PLUGIN_DIR
+
 
 class PluginData(PluginShared):
 
@@ -179,6 +203,13 @@ class PluginData(PluginShared):
         except AttributeError:
             log.debug('Attribute %r not found for plugin %r', name, self.module_name)
             return None
+
+    @property
+    def version(self):
+        try:
+            return Version.from_string(self.__dict__['version'])
+        except (KeyError, VersionError):
+            return Version(0, 0, 0)
 
     @property
     def files_list(self):

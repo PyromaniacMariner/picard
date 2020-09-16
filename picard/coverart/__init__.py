@@ -1,12 +1,14 @@
 # -*- coding: utf-8 -*-
 #
 # Picard, the next-generation MusicBrainz tagger
+#
 # Copyright (C) 2007 Oliver Charles
-# Copyright (C) 2007-2011 Philipp Wolfer
-# Copyright (C) 2007, 2010, 2011 Lukáš Lalinský
+# Copyright (C) 2007, 2010-2011 Lukáš Lalinský
+# Copyright (C) 2007-2011, 2019 Philipp Wolfer
 # Copyright (C) 2011 Michael Wiencek
 # Copyright (C) 2011-2012 Wieland Hoffmann
-# Copyright (C) 2013-2014 Laurent Monin
+# Copyright (C) 2013-2015, 2018-2019 Laurent Monin
+# Copyright (C) 2016-2017 Sambhav Kothari
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -77,8 +79,8 @@ class CoverArt:
                 for track in self.album._new_tracks:
                     track.metadata.images.append(coverartimage)
                 # If the image already was a front image,
-                # there might still be some other non-CAA front
-                # images in the queue - ignore them.
+                # there might still be some other non-CAA front
+                # images in the queue - ignore them.
                 if not self.front_image_found:
                     self.front_image_found = coverartimage.is_front_image()
             else:

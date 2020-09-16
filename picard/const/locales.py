@@ -3,6 +3,9 @@
 # Picard, the next-generation MusicBrainz tagger
 #
 # Copyright (C) 2007 Lukáš Lalinský
+# Copyright (C) 2014, 2020 Laurent Monin
+# Copyright (C) 2017 Sambhav Kothari
+# Copyright (C) 2019 Philipp Wolfer
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -225,7 +228,7 @@ ALIAS_LOCALES = {
     'ja': N_('Japanese'),
     'ja_JP': N_('Japanese (Japan)'),
     'kaj': N_('Jju'),
-    'kaj_NG': N_('Jju Nigeria'),
+    'kaj_NG': N_('Jju (Nigeria)'),
     'kl': N_('Kalaallisut'),
     'kl_GL': N_('Kalaallisut (Greenland)'),
     'kam': N_('Kamba'),

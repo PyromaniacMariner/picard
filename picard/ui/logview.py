@@ -1,7 +1,14 @@
 # -*- coding: utf-8 -*-
 #
 # Picard, the next-generation MusicBrainz tagger
+#
 # Copyright (C) 2007 Lukáš Lalinský
+# Copyright (C) 2008-2009, 2019-2020 Philipp Wolfer
+# Copyright (C) 2012-2013 Michael Wiencek
+# Copyright (C) 2013-2014, 2018-2019 Laurent Monin
+# Copyright (C) 2014 Sophist-UK
+# Copyright (C) 2016, 2018 Sambhav Kothari
+# Copyright (C) 2018 Wieland Hoffmann
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -33,7 +40,10 @@ from picard import (
 )
 from picard.util import reconnect
 
-from picard.ui import PicardDialog
+from picard.ui import (
+    FONT_FAMILY_MONOSPACE,
+    PicardDialog,
+)
 from picard.ui.colors import interface_colors
 
 
@@ -129,14 +139,14 @@ class VerbosityMenu(QtWidgets.QMenu):
         super().__init__(parent=parent)
 
         self.action_group = QtWidgets.QActionGroup(self)
-        self.action_group .setExclusive(True)
         self.actions = {}
         for level, feat in log.levels_features.items():
-            act = QtWidgets.QAction(_(feat.name), self, checkable=True)
-            act.triggered.connect(partial(self.verbosity_changed.emit, level))
-            self.action_group.addAction(act)
-            self.addAction(act)
-            self.actions[level] = act
+            action = QtWidgets.QAction(_(feat.name), self)
+            action.setCheckable(True)
+            action.triggered.connect(partial(self.verbosity_changed.emit, level))
+            self.action_group.addAction(action)
+            self.addAction(action)
+            self.actions[level] = action
 
     def set_verbosity(self, level):
         self.actions[level].setChecked(True)
@@ -225,11 +235,9 @@ class LogView(LogViewCommon):
     def _setup_formats(self):
         interface_colors.load_from_config()
         self.formats = {}
-        font = QtGui.QFont()
-        font.setFamily("Monospace")
         for level, feat in log.levels_features.items():
             text_fmt = QtGui.QTextCharFormat()
-            text_fmt.setFont(font)
+            text_fmt.setFontFamily(FONT_FAMILY_MONOSPACE)
             text_fmt.setForeground(interface_colors.get_qcolor(feat.color_key))
             self.formats[level] = text_fmt
 

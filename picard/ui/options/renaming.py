@@ -1,8 +1,20 @@
 # -*- coding: utf-8 -*-
 #
 # Picard, the next-generation MusicBrainz tagger
-# Copyright (C) 2006-2008 Lukáš Lalinský
-# Copyright (C) 2009 Nikolai Prokoschenko
+#
+# Copyright (C) 2006-2008, 2011 Lukáš Lalinský
+# Copyright (C) 2008-2009 Nikolai Prokoschenko
+# Copyright (C) 2009-2010, 2014-2015, 2018-2020 Philipp Wolfer
+# Copyright (C) 2011-2013 Michael Wiencek
+# Copyright (C) 2011-2013 Wieland Hoffmann
+# Copyright (C) 2013 Calvin Walton
+# Copyright (C) 2013 Ionuț Ciocîrlan
+# Copyright (C) 2013-2014 Sophist-UK
+# Copyright (C) 2013-2015, 2018-2019 Laurent Monin
+# Copyright (C) 2015 Alex Berman
+# Copyright (C) 2015 Ohm Patel
+# Copyright (C) 2016 Suhas
+# Copyright (C) 2016-2017 Sambhav Kothari
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -18,15 +30,13 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 
+
 from functools import partial
 import os.path
 
 from PyQt5 import QtWidgets
 from PyQt5.QtCore import QStandardPaths
-from PyQt5.QtGui import (
-    QFont,
-    QPalette,
-)
+from PyQt5.QtGui import QPalette
 
 from picard import config
 from picard.const import (
@@ -46,16 +56,12 @@ from picard.ui.options import (
     OptionsPage,
     register_options_page,
 )
-from picard.ui.options.scripting import TaggerScriptSyntaxHighlighter
+from picard.ui.options.scripting import ScriptCheckError
 from picard.ui.ui_options_renaming import Ui_RenamingOptionsPage
 from picard.ui.util import enabledSlot
 
 
 _default_music_dir = QStandardPaths.writableLocation(QStandardPaths.MusicLocation)
-
-
-class ScriptCheckError(OptionsCheckError):
-    pass
 
 
 class RenamingOptionsPage(OptionsPage):
@@ -65,6 +71,7 @@ class RenamingOptionsPage(OptionsPage):
     PARENT = None
     SORT_ORDER = 40
     ACTIVE = True
+    HELP_URL = '/config/options_filerenaming.html'
 
     options = [
         config.BoolOption("setting", "windows_compatibility", True),
@@ -107,13 +114,9 @@ class RenamingOptionsPage(OptionsPage):
         )
         self.ui.file_naming_format.textChanged.connect(self.check_formats)
         self.ui.file_naming_format_default.clicked.connect(self.set_file_naming_format_default)
-        self.highlighter = TaggerScriptSyntaxHighlighter(self.ui.file_naming_format.document())
         self.ui.move_files_to_browse.clicked.connect(self.move_files_to_browse)
 
         script_edit = self.ui.file_naming_format
-        font = QFont('Monospace')
-        font.setStyleHint(QFont.TypeWriter)
-        script_edit.setFont(font)
         self.script_palette_normal = script_edit.palette()
         self.script_palette_readonly = QPalette(self.script_palette_normal)
         disabled_color = self.script_palette_normal.color(QPalette.Inactive, QPalette.Window)

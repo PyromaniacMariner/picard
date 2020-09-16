@@ -1,8 +1,31 @@
 # -*- coding: utf-8 -*-
 #
 # Picard, the next-generation MusicBrainz tagger
+#
 # Copyright (C) 2004 Robert Kaye
-# Copyright (C) 2006 Lukáš Lalinský
+# Copyright (C) 2006-2009, 2011-2014, 2017 Lukáš Lalinský
+# Copyright (C) 2008 Gary van der Merwe
+# Copyright (C) 2008 amckinle
+# Copyright (C) 2008-2010, 2014-2015, 2018-2020 Philipp Wolfer
+# Copyright (C) 2009 Carlin Mangar
+# Copyright (C) 2010 Andrew Barnert
+# Copyright (C) 2011-2014 Michael Wiencek
+# Copyright (C) 2011-2014, 2017-2019 Wieland Hoffmann
+# Copyright (C) 2012 Chad Wilson
+# Copyright (C) 2013 Calvin Walton
+# Copyright (C) 2013 Ionuț Ciocîrlan
+# Copyright (C) 2013 brainz34
+# Copyright (C) 2013-2014, 2017 Sophist-UK
+# Copyright (C) 2013-2015, 2017-2019 Laurent Monin
+# Copyright (C) 2016 Rahul Raturi
+# Copyright (C) 2016 Simon Legner
+# Copyright (C) 2016 Suhas
+# Copyright (C) 2016-2018 Sambhav Kothari
+# Copyright (C) 2017-2018 Vishal Choudhary
+# Copyright (C) 2018 Bob Swift
+# Copyright (C) 2018 virusMac
+# Copyright (C) 2019 Joel Lintunen
+# Copyright (C) 2020 Gabriel Ferreira
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -18,7 +41,9 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 
+
 import argparse
+from collections import defaultdict
 from functools import partial
 from itertools import chain
 import logging
@@ -35,7 +60,6 @@ from PyQt5 import (
     QtGui,
     QtWidgets,
 )
-from PyQt5.QtDBus import QDBusConnection
 
 from picard import (
     PICARD_APP_ID,
@@ -103,6 +127,7 @@ from picard.webservice.api_helpers import (
 
 import picard.resources  # noqa: F401 # pylint: disable=unused-import
 
+from picard.ui import theme
 from picard.ui.itemviews import BaseTreeView
 from picard.ui.mainwindow import MainWindow
 from picard.ui.searchdialog.album import AlbumSearchDialog
@@ -138,20 +163,10 @@ class Tagger(QtWidgets.QApplication):
 
     def __init__(self, picard_args, unparsed_args, localedir, autoupdate):
 
-        # Use the new fusion style from PyQt5 for a modern and consistent look
-        # across all OSes.
-        if not IS_MACOS and not IS_HAIKU:
-            self.setStyle('Fusion')
-
-        # Set the WM_CLASS to 'MusicBrainz-Picard' so desktop environments
-        # can use it to look up the app
-        super().__init__(['MusicBrainz-Picard'] + unparsed_args)
+        super().__init__(sys.argv)
         self.__class__.__instance = self
         config._setup(self, picard_args.config_file)
-
-        super().setStyleSheet(
-            'QGroupBox::title { /* PICARD-1206, Qt bug workaround */ }'
-        )
+        theme.setup(self)
 
         self._cmdline_files = picard_args.FILE
         self.autoupdate_enabled = autoupdate
@@ -172,6 +187,7 @@ class Tagger(QtWidgets.QApplication):
         # expects instant feedback instead of waiting for a long list of
         # operations to finish.
         self.priority_thread_pool = QtCore.QThreadPool(self)
+        self.priority_thread_pool.setMaxThreadCount(1)
 
         # Use a separate thread pool for file saving, with a thread count of 1,
         # to avoid race conditions in File._save_and_rename.
@@ -204,8 +220,6 @@ class Tagger(QtWidgets.QApplication):
         if IS_MACOS:
             # On macOS it is not common that the global menu shows icons
             self.setAttribute(QtCore.Qt.AA_DontShowIconsInMenus)
-            # Ensure monospace font works on macOS
-            QtGui.QFont.insertSubstitution('Monospace', 'Menlo')
 
         # Setup logging
         log.debug("Starting Picard from %r", os.path.abspath(__file__))
@@ -231,13 +245,14 @@ class Tagger(QtWidgets.QApplication):
 
         self.webservice = WebService()
         self.mb_api = MBAPIHelper(self.webservice)
-        self.acoustid_api = AcoustIdAPIHelper(self.webservice)
 
         load_user_collections()
 
         # Initialize fingerprinting
-        self._acoustid = acoustid.AcoustIDClient()
+        acoustid_api = AcoustIdAPIHelper(self.webservice)
+        self._acoustid = acoustid.AcoustIDClient(acoustid_api)
         self._acoustid.init()
+        self.acoustidmanager = AcoustIDManager(acoustid_api)
 
         # Load plugins
         self.pluginmanager = PluginManager()
@@ -252,9 +267,9 @@ class Tagger(QtWidgets.QApplication):
                 os.makedirs(USER_PLUGIN_DIR)
             self.pluginmanager.load_plugins_from_directory(USER_PLUGIN_DIR)
 
-        self.acoustidmanager = AcoustIDManager()
         self.browser_integration = BrowserIntegration()
 
+        self._pending_files_count = 0
         self.files = {}
         self.clusters = ClusterList()
         self.albums = {}
@@ -334,7 +349,7 @@ class Tagger(QtWidgets.QApplication):
     def move_file_to_track(self, file, albumid, recordingid):
         """Move `file` to recording `recordingid` on album `albumid`."""
         album = self.load_album(albumid)
-        file.move(album.unmatched_files)
+        album.run_when_loaded(partial(file.move, album.unmatched_files), always=True)
         album.run_when_loaded(partial(album.match_files, [file],
                                       recordingid=recordingid))
 
@@ -370,14 +385,8 @@ class Tagger(QtWidgets.QApplication):
 
     def _run_init(self):
         if self._cmdline_files:
-            files = []
-            for file in self._cmdline_files:
-                if os.path.isdir(file):
-                    self.add_directory(decode_filename(file))
-                else:
-                    files.append(decode_filename(file))
-            if files:
-                self.add_files(files)
+            files = [decode_filename(f) for f in self._cmdline_files]
+            self.add_paths(files)
             del self._cmdline_files
 
     def run(self):
@@ -393,19 +402,30 @@ class Tagger(QtWidgets.QApplication):
         if isinstance(event, thread.ProxyToMainEvent):
             event.run()
         elif event.type() == QtCore.QEvent.FileOpen:
-            self.add_files([event.file()])
+            file = event.file()
+            self.add_paths([file])
+            if IS_HAIKU:
+                self.bring_tagger_front()
             # We should just return True here, except that seems to
             # cause the event's sender to get a -9874 error, so
             # apparently there's some magic inside QFileOpenEvent...
             return 1
         return super().event(event)
 
-    def _file_loaded(self, file, target=None):
-        if file is None or file.has_error():
+    def _file_loaded(self, file, target=None, remove_file=False):
+        self._pending_files_count -= 1
+        if self._pending_files_count == 0:
+            self.window.set_sorting(True)
+
+        if remove_file:
+            file.remove()
             return
 
-        if target is not None:
-            self.move_files([file], target)
+        if file is None:
+            return
+
+        if file.has_error():
+            self.unclustered_files.add_file(file)
             return
 
         if not config.setting["ignore_file_mbids"]:
@@ -433,6 +453,11 @@ class Tagger(QtWidgets.QApplication):
                 self.move_file_to_nat(file, recordingid)
                 return
 
+        if target:
+            self.move_files([file], target)
+        else:
+            self.unclustered_files.add_file(file)
+
         # fallback on analyze if nothing else worked
         if config.setting['analyze_new_files'] and file.can_analyze():
             log.debug("Trying to analyze %r ...", file)
@@ -442,23 +467,30 @@ class Tagger(QtWidgets.QApplication):
         if target is None:
             log.debug("Aborting move since target is invalid")
             return
+        self.window.set_sorting(False)
         if isinstance(target, (Track, Cluster)):
             for file in files:
                 file.move(target)
+                QtCore.QCoreApplication.processEvents()
         elif isinstance(target, File):
             for file in files:
                 file.move(target.parent)
+                QtCore.QCoreApplication.processEvents()
         elif isinstance(target, Album):
             self.move_files_to_album(files, album=target)
         elif isinstance(target, ClusterList):
             self.cluster(files)
+        self.window.set_sorting(True)
 
     def add_files(self, filenames, target=None):
         """Add files to the tagger."""
         ignoreregex = None
         pattern = config.setting['ignore_regex']
         if pattern:
-            ignoreregex = re.compile(pattern)
+            try:
+                ignoreregex = re.compile(pattern)
+            except re.error as e:
+                log.error("Failed evaluating regular expression for ignore_regex: %s", e)
         ignore_hidden = config.setting["ignore_hidden_files"]
         new_files = []
         for filename in filenames:
@@ -478,85 +510,40 @@ class Tagger(QtWidgets.QApplication):
                 if file:
                     self.files[filename] = file
                     new_files.append(file)
+                QtCore.QCoreApplication.processEvents()
         if new_files:
             log.debug("Adding files %r", new_files)
             new_files.sort(key=lambda x: x.filename)
-            if target is None or target is self.unclustered_files:
-                self.unclustered_files.add_files(new_files)
-                target = None
+            self.window.set_sorting(False)
+            self._pending_files_count += len(new_files)
             for file in new_files:
                 file.load(partial(self._file_loaded, target=target))
+                QtCore.QCoreApplication.processEvents()
 
-    def add_directory(self, path):
-        if config.setting['recursively_add_files']:
-            self._add_directory_recursive(path)
-        else:
-            self._add_directory_non_recursive(path)
-
-    def _add_directory_recursive(self, path):
-        ignore_hidden = config.setting["ignore_hidden_files"]
-        walk = os.walk(path)
-
-        def get_files():
+    @staticmethod
+    def _scan_paths_recursive(paths, recursive, ignore_hidden):
+        local_paths = list(paths)
+        while local_paths:
+            current_path = local_paths.pop(0)
             try:
-                root, dirs, files = next(walk)
-                if ignore_hidden:
-                    dirs[:] = [d for d in dirs if not is_hidden(os.path.join(root, d))]
-            except StopIteration:
-                return None
-            else:
-                number_of_files = len(files)
-                if number_of_files:
-                    mparms = {
-                        'count': number_of_files,
-                        'directory': root,
-                    }
-                    log.debug("Adding %(count)d files from '%(directory)r'" %
-                              mparms)
-                    self.window.set_statusbar_message(
-                        ngettext(
-                            "Adding %(count)d file from '%(directory)s' ...",
-                            "Adding %(count)d files from '%(directory)s' ...",
-                            number_of_files),
-                        mparms,
-                        translate=None,
-                        echo=None
-                    )
-                return (os.path.join(root, f) for f in files)
+                if os.path.isdir(current_path):
+                    for entry in os.scandir(current_path):
+                        if ignore_hidden and is_hidden(entry.path):
+                            continue
+                        if recursive and entry.is_dir():
+                            local_paths.append(entry.path)
+                        else:
+                            yield entry.path
+                else:
+                    yield current_path
+            except FileNotFoundError:
+                pass
 
-        def process(result=None, error=None):
-            if result:
-                if error is None:
-                    self.add_files(result)
-                thread.run_task(get_files, process)
-
-        process(True, False)
-
-    def _add_directory_non_recursive(self, path):
-        files = []
-        for f in os.listdir(path):
-            listing = os.path.join(path, f)
-            if os.path.isfile(listing):
-                files.append(listing)
-        number_of_files = len(files)
-        if number_of_files:
-            mparms = {
-                'count': number_of_files,
-                'directory': path,
-            }
-            log.debug("Adding %(count)d files from '%(directory)r'" %
-                      mparms)
-            self.window.set_statusbar_message(
-                ngettext(
-                    "Adding %(count)d file from '%(directory)s' ...",
-                    "Adding %(count)d files from '%(directory)s' ...",
-                    number_of_files),
-                mparms,
-                translate=None,
-                echo=None
-            )
-            # Function call only if files exist
-            self.add_files(files)
+    def add_paths(self, paths, target=None):
+        files = self._scan_paths_recursive(paths,
+                            config.setting['recursively_add_files'],
+                            config.setting["ignore_hidden_files"])
+        self.add_files(files, target=target)
 
     def get_file_lookup(self):
         """Return a FileLookup object."""
@@ -788,6 +775,19 @@ class Tagger(QtWidgets.QApplication):
             self._acoustid.analyze(file, partial(file._lookup_finished,
                                                  File.LOOKUP_ACOUSTID))
 
+    def generate_fingerprints(self, objs):
+        """Generate the fingerprints without matching the files."""
+        if not self.use_acoustid:
+            return
+        files = self.get_files_from_objects(objs)
+
+        def finished(file, result):
+            file.clear_pending()
+
+        for file in files:
+            file.set_pending()
+            self._acoustid.fingerprint(file, partial(finished, file))
+
     # =======================================================================
     #  Metadata-based lookups
     # =======================================================================
@@ -808,11 +808,16 @@ class Tagger(QtWidgets.QApplication):
             files = list(self.unclustered_files.files)
         else:
             files = self.get_files_from_objects(objs)
-        for name, artist, files in Cluster.cluster(files, 1.0):
-            QtCore.QCoreApplication.processEvents()
+
+        self.window.set_sorting(False)
+        cluster_files = defaultdict(list)
+        for name, artist, files in Cluster.cluster(files, 1.0, self):
             cluster = self.load_cluster(name, artist)
-            for file in sorted(files, key=attrgetter('discnumber', 'tracknumber', 'base_filename')):
-                file.move(cluster)
+            cluster_files[cluster].extend(sorted(files, key=attrgetter('discnumber', 'tracknumber', 'base_filename')))
+        for cluster, files in cluster_files.items():
+            cluster.add_files(files)
+            QtCore.QCoreApplication.processEvents()
+        self.window.set_sorting(True)
 
     def load_cluster(self, name, artist):
         for cluster in self.clusters:
@@ -876,6 +881,14 @@ def process_picard_args():
     parser = argparse.ArgumentParser(
         epilog="If one of the filenames begins with a hyphen, use -- to separate the options from the filenames."
     )
+    # Qt default arguments. Parse them so Picard does not interpret the
+    # arguments as file names to load.
+    parser.add_argument("-style", nargs=1, help=argparse.SUPPRESS)
+    parser.add_argument("-stylesheet", nargs=1, help=argparse.SUPPRESS)
+    # Same for default X arguments
+    parser.add_argument("-display", nargs=1, help=argparse.SUPPRESS)
+
+    # Picard specific arguments
     parser.add_argument("-c", "--config-file", action='store',
                         default=None,
                         help="location of the configuration file")
@@ -903,6 +916,14 @@ def main(localedir=None, autoupdate=True):
     # Allow High DPI Support
     QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_UseHighDpiPixmaps)
     QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_EnableHighDpiScaling)
+    # HighDpiScaleFactorRoundingPolicy is available since Qt 5.14. This is
+    # required to support fractional scaling properly.
+    if hasattr(QtGui.QGuiApplication, 'setHighDpiScaleFactorRoundingPolicy'):
+        QtGui.QGuiApplication.setHighDpiScaleFactorRoundingPolicy(
+            QtCore.Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
+
+    # Enable mnemonics on all platforms, even macOS
+    QtGui.qt_set_sequence_auto_mnemonic(True)
 
     signal.signal(signal.SIGINT, signal.SIG_DFL)
 
@@ -912,9 +933,12 @@ def main(localedir=None, autoupdate=True):
     if picard_args.long_version:
         return longversion()
 
-    if not (IS_WIN or IS_MACOS or IS_HAIKU):
+    try:
+        from PyQt5.QtDBus import QDBusConnection
         dbus = QDBusConnection.sessionBus()
         dbus.registerService(PICARD_APP_ID)
+    except ImportError:
+        pass
 
     tagger = Tagger(picard_args, unparsed_args, localedir, autoupdate)
 

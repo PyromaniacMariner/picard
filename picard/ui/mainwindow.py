@@ -1,7 +1,33 @@
 # -*- coding: utf-8 -*-
 #
 # Picard, the next-generation MusicBrainz tagger
-# Copyright (C) 2006 Lukáš Lalinský
+#
+# Copyright (C) 2006-2008, 2011-2012, 2014 Lukáš Lalinský
+# Copyright (C) 2007 Nikolai Prokoschenko
+# Copyright (C) 2008 Gary van der Merwe
+# Copyright (C) 2008 Robert Kaye
+# Copyright (C) 2008 Will
+# Copyright (C) 2008-2010, 2015, 2018-2020 Philipp Wolfer
+# Copyright (C) 2009 Carlin Mangar
+# Copyright (C) 2009 David Hilton
+# Copyright (C) 2011-2012 Chad Wilson
+# Copyright (C) 2011-2013, 2015-2017 Wieland Hoffmann
+# Copyright (C) 2011-2014 Michael Wiencek
+# Copyright (C) 2013-2014, 2017 Sophist-UK
+# Copyright (C) 2013-2020 Laurent Monin
+# Copyright (C) 2015 Ohm Patel
+# Copyright (C) 2015 samithaj
+# Copyright (C) 2016 Rahul Raturi
+# Copyright (C) 2016 Simon Legner
+# Copyright (C) 2016-2017 Sambhav Kothari
+# Copyright (C) 2017 Antonio Larrosa
+# Copyright (C) 2017 Frederik “Freso” S. Olesen
+# Copyright (C) 2018 Bob Swift
+# Copyright (C) 2018 Kartik Ohri
+# Copyright (C) 2018 Vishal Choudhary
+# Copyright (C) 2018 virusMac
+# Copyright (C) 2019 Timur Enikeev
+# Copyright (C) 2020 Gabriel Ferreira
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -16,6 +42,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
+
 
 from collections import OrderedDict
 import datetime
@@ -54,6 +81,7 @@ from picard.util.cdrom import (
 )
 
 from picard.ui import PreserveGeometry
+from picard.ui.aboutdialog import AboutDialog
 from picard.ui.coverartbox import CoverArtBox
 from picard.ui.filebrowser import FileBrowser
 from picard.ui.infodialog import (
@@ -162,9 +190,8 @@ class MainWindow(QtWidgets.QMainWindow, PreserveGeometry):
         if not self.show_cover_art_action.isChecked():
             self.cover_art_box.hide()
 
-        self.logDialog = LogView(self)
-        self.historyDialog = HistoryView(self)
-        self.optionsDialog = None
+        self.log_dialog = LogView(self)
+        self.history_dialog = HistoryView(self)
 
         bottomLayout = QtWidgets.QHBoxLayout()
         bottomLayout.setContentsMargins(0, 0, 0, 0)
@@ -184,6 +211,13 @@ class MainWindow(QtWidgets.QMainWindow, PreserveGeometry):
         for function in ui_init:
             function(self)
 
+    def set_processing(self, processing=True):
+        self.panel.set_processing(processing)
+
+    def set_sorting(self, sorting=True):
+        self.panel.set_sorting(sorting)
+        # self.panel.collapse_clusters(not sorting)
+
     def keyPressEvent(self, event):
         # On macOS Command+Backspace triggers the so called "Forward Delete".
         # It should be treated the same as the Delete button.
@@ -195,6 +229,8 @@ class MainWindow(QtWidgets.QMainWindow, PreserveGeometry):
                 self.metadata_box.remove_selected_tags()
             else:
                 self.remove()
+        elif event.matches(QtGui.QKeySequence.Find):
+            self.search_edit.setFocus(True)
         else:
             super().keyPressEvent(event)
 
@@ -252,6 +288,8 @@ class MainWindow(QtWidgets.QMainWindow, PreserveGeometry):
         config.persist["window_state"] = self.saveState()
         isMaximized = int(self.windowState()) & QtCore.Qt.WindowMaximized != 0
         self.save_geometry()
+        self.log_dialog.save_geometry()
+        self.history_dialog.save_geometry()
         config.persist["window_maximized"] = isMaximized
         config.persist["view_cover_art"] = self.show_cover_art_action.isChecked()
         config.persist["view_toolbar"] = self.show_toolbar_action.isChecked()
@@ -338,7 +376,7 @@ class MainWindow(QtWidgets.QMainWindow, PreserveGeometry):
             return hasattr(obj, 'keys') and hasattr(obj, '__getitem__')
 
         echo = kwargs.get('echo', log.debug)
-        # _ is defined using builtins.__dict__, so setting it as default named argument
+        # _ is defined using builtins.__dict__, so setting it as default named argument
         # value doesn't work as expected
         translate = kwargs.get('translate', _)
         timeout = kwargs.get('timeout', 0)
@@ -406,10 +444,10 @@ class MainWindow(QtWidgets.QMainWindow, PreserveGeometry):
         self.add_files_action.setShortcut(QtGui.QKeySequence.Open)
         self.add_files_action.triggered.connect(self.add_files)
 
-        self.add_directory_action = QtWidgets.QAction(icontheme.lookup('folder'), _("A&dd Folder..."), self)
+        self.add_directory_action = QtWidgets.QAction(icontheme.lookup('folder'), _("Add Fold&er..."), self)
         self.add_directory_action.setStatusTip(_("Add a folder to the tagger"))
         # TR: Keyboard shortcut for "Add Directory..."
-        self.add_directory_action.setShortcut(QtGui.QKeySequence(_("Ctrl+D")))
+        self.add_directory_action.setShortcut(QtGui.QKeySequence(_("Ctrl+E")))
         self.add_directory_action.triggered.connect(self.add_directory)
 
         if self.show_close_window:
@@ -500,6 +538,14 @@ class MainWindow(QtWidgets.QMainWindow, PreserveGeometry):
         self.analyze_action.setShortcut(QtGui.QKeySequence(_("Ctrl+Y")))
         self.analyze_action.triggered.connect(self.analyze)
 
+        self.generate_fingerprints_action = QtWidgets.QAction(icontheme.lookup('fingerprint'), _("&Generate AcoustID Fingerprints"), self)
+        self.generate_fingerprints_action.setIconText(_("Generate Fingerprints"))
+        self.generate_fingerprints_action.setStatusTip(_("Generate the AcoustID audio fingerprints for the selected files without doing a lookup"))
+        self.generate_fingerprints_action.setEnabled(False)
+        self.generate_fingerprints_action.setToolTip(_('Generate the AcoustID audio fingerprints for the selected files'))
+        self.generate_fingerprints_action.setShortcut(QtGui.QKeySequence(_("Ctrl+Shift+Y")))
+        self.generate_fingerprints_action.triggered.connect(self.generate_fingerprints)
+
         self.cluster_action = QtWidgets.QAction(icontheme.lookup('picard-cluster'), _("Cl&uster"), self)
         self.cluster_action.setStatusTip(_("Cluster files into album clusters"))
         self.cluster_action.setEnabled(False)
@@ -552,7 +598,7 @@ class MainWindow(QtWidgets.QMainWindow, PreserveGeometry):
         self.view_log_action = QtWidgets.QAction(_("View &Error/Debug Log"), self)
         self.view_log_action.triggered.connect(self.show_log)
         # TR: Keyboard shortcut for "View Error/Debug Log"
-        self.view_log_action.setShortcut(QtGui.QKeySequence(_("Ctrl+E")))
+        self.view_log_action.setShortcut(QtGui.QKeySequence(_("Ctrl+G")))
 
         self.view_history_action = QtWidgets.QAction(_("View Activity &History"), self)
         self.view_history_action.triggered.connect(self.show_history)
@@ -675,6 +721,7 @@ class MainWindow(QtWidgets.QMainWindow, PreserveGeometry):
         menu.addAction(self.cluster_action)
         menu.addAction(self.browser_lookup_action)
         menu.addSeparator()
+        menu.addAction(self.generate_fingerprints_action)
         menu.addAction(self.tags_from_filenames_action)
         menu.addAction(self.open_collection_in_browser_action)
         self.menuBar().addSeparator()
@@ -815,9 +862,7 @@ class MainWindow(QtWidgets.QMainWindow, PreserveGeometry):
         tab_order(self.search_edit, self.search_button)
         # Panels
         tab_order(self.search_button, self.file_browser)
-        tab_order(self.file_browser, self.panel.views[0])
-        tab_order(self.panel.views[0], self.panel.views[1])
-        tab_order(self.panel.views[1], self.metadata_box)
+        self.panel.tab_order(tab_order, self.file_browser, self.metadata_box)
 
     def enable_submit(self, enabled):
         """Enable/disable the 'Submit fingerprints' action."""
@@ -895,38 +940,29 @@ class MainWindow(QtWidgets.QMainWindow, PreserveGeometry):
                     {'directory': dir_list[0]}
                 )
 
-            for directory in dir_list:
-                self.tagger.add_directory(directory)
+            self.tagger.add_paths(dir_list)
 
     def close_active_window(self):
         self.tagger.activeWindow().close()
 
     def show_about(self):
-        self.show_options("about")
+        return AboutDialog.show_instance(self)
 
     def show_options(self, page=None):
-        if not self.optionsDialog:
-            self.optionsDialog = OptionsDialog(page, self)
-            self.optionsDialog.finished.connect(self.on_options_closed)
-        self.optionsDialog.show()
-        self.optionsDialog.raise_()
-        self.optionsDialog.activateWindow()
-
-    def on_options_closed(self):
-        self.optionsDialog = None
+        return OptionsDialog.show_instance(page, self)
 
     def show_help(self):
         webbrowser2.goto('documentation')
 
     def show_log(self):
-        self.logDialog.show()
-        self.logDialog.raise_()
-        self.logDialog.activateWindow()
+        self.log_dialog.show()
+        self.log_dialog.raise_()
+        self.log_dialog.activateWindow()
 
     def show_history(self):
-        self.historyDialog.show()
-        self.historyDialog.raise_()
-        self.historyDialog.activateWindow()
+        self.history_dialog.show()
+        self.history_dialog.raise_()
+        self.history_dialog.activateWindow()
 
     def open_bug_report(self):
         webbrowser2.goto('troubleshooting')
@@ -946,12 +982,16 @@ class MainWindow(QtWidgets.QMainWindow, PreserveGeometry):
         self.panel.remove(self.selected_objects)
 
     def analyze(self):
-        if not config.setting['fingerprinting_system']:
-            if self.show_analyze_settings_info():
-                self.show_options("fingerprinting")
-            if not config.setting['fingerprinting_system']:
-                return
-        return self.tagger.analyze(self.selected_objects)
+        def callback(fingerprinting_system):
+            if fingerprinting_system:
+                self.tagger.analyze(self.selected_objects)
+        self._ensure_fingerprinting_configured(callback)
+
+    def generate_fingerprints(self):
+        def callback(fingerprinting_system):
+            if fingerprinting_system:
+                self.tagger.generate_fingerprints(self.selected_objects)
+        self._ensure_fingerprinting_configured(callback)
 
     def _openUrl(self, url):
         return QtCore.QUrl.fromLocalFile(url)
@@ -970,7 +1010,17 @@ class MainWindow(QtWidgets.QMainWindow, PreserveGeometry):
         for folder in folders:
             QtGui.QDesktopServices.openUrl(self._openUrl(folder))
 
-    def show_analyze_settings_info(self):
+    def _ensure_fingerprinting_configured(self, callback):
+        def on_finished(result):
+            callback(config.setting['fingerprinting_system'])
+        if not config.setting['fingerprinting_system']:
+            if self._show_analyze_settings_info():
+                dialog = self.show_options("fingerprinting")
+                dialog.finished.connect(on_finished)
+        else:
+            callback(config.setting['fingerprinting_system'])
+
+    def _show_analyze_settings_info(self):
         ret = QtWidgets.QMessageBox.question(self,
             _("Configuration Required"),
             _("Audio fingerprinting is not yet configured. Would you like to configure it now?"),
@@ -1050,6 +1100,7 @@ class MainWindow(QtWidgets.QMainWindow, PreserveGeometry):
         self.save_action.setEnabled(can_save)
         self.view_info_action.setEnabled(can_view_info)
         self.analyze_action.setEnabled(can_analyze)
+        self.generate_fingerprints_action.setEnabled(have_files)
         self.refresh_action.setEnabled(can_refresh)
         self.autotag_action.setEnabled(can_autotag)
         self.browser_lookup_action.setEnabled(can_browser_lookup)
@@ -1060,7 +1111,7 @@ class MainWindow(QtWidgets.QMainWindow, PreserveGeometry):
         self.tags_from_filenames_action.setEnabled(bool(files))
         self.track_search_action.setEnabled(have_objects)
 
-    def update_selection(self, objects=None):
+    def update_selection(self, objects=None, new_selection=True, drop_album_caches=False):
         if self.ignore_selection_changes:
             return
 
@@ -1124,10 +1175,15 @@ class MainWindow(QtWidgets.QMainWindow, PreserveGeometry):
             elif obj.can_show_coverart:
                 metadata = obj.metadata
 
-        self.metadata_box.selection_dirty = True
-        self.metadata_box.update()
+        if new_selection:
+            self.metadata_box.selection_dirty = True
+        self.metadata_box.update(drop_album_caches=drop_album_caches)
         self.cover_art_box.set_metadata(metadata, orig_metadata, obj)
         self.selection_updated.emit(objects)
+
+    def refresh_metadatabox(self):
+        self.tagger.window.metadata_box.selection_dirty = True
+        self.tagger.window.metadata_box.update()
 
     def show_cover_art(self):
         """Show/hide the cover art box."""

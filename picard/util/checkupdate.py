@@ -1,7 +1,10 @@
 # -*- coding: utf-8 -*-
 #
 # Picard, the next-generation MusicBrainz tagger
+#
 # Copyright (C) 2018 Bob Swift
+# Copyright (C) 2018 Laurent Monin
+# Copyright (C) 2018, 2020 Philipp Wolfer
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -17,6 +20,7 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 
+
 from functools import partial
 
 from PyQt5 import QtCore
@@ -31,9 +35,10 @@ from picard.const import (
     PLUGINS_API,
     PROGRAM_UPDATE_LEVELS,
 )
-from picard.util import (
-    compare_version_tuples,
-    webbrowser2,
+from picard.util import webbrowser2
+from picard.version import (
+    Version,
+    VersionError,
 )
 
 
@@ -123,8 +128,13 @@ class UpdateCheckManager(QtCore.QObject):
         high_version = PICARD_VERSION
         for test_key in PROGRAM_UPDATE_LEVELS:
             update_level = PROGRAM_UPDATE_LEVELS[test_key]['name']
-            test_version = self._available_versions.get(update_level, {}).get('version', (0, 0, 0, ''))
-            if self._update_level >= test_key and compare_version_tuples(high_version, test_version) > 0:
+            version_tuple = self._available_versions.get(update_level, {}).get('version', (0, 0, 0, ''))
+            try:
+                test_version = Version(*version_tuple)
+            except (TypeError, VersionError):
+                log.error('Invalid version %r for update level %s.' % (version_tuple, update_level))
+                continue
+            if self._update_level >= test_key and test_version > high_version:
                 key = PROGRAM_UPDATE_LEVELS[test_key]['name']
                 high_version = test_version
         if key:

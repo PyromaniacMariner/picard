@@ -1,7 +1,11 @@
 # -*- coding: utf-8 -*-
 #
 # Picard, the next-generation MusicBrainz tagger
-# Copyright (C) 2006 Lukáš Lalinský
+#
+# Copyright (C) 2006-2007 Lukáš Lalinský
+# Copyright (C) 2013-2015, 2018 Laurent Monin
+# Copyright (C) 2014, 2019 Philipp Wolfer
+# Copyright (C) 2016-2017 Sambhav Kothari
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -16,6 +20,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
+
 
 from picard import config
 
@@ -33,6 +38,7 @@ class AdvancedOptionsPage(OptionsPage):
     PARENT = None
     SORT_ORDER = 90
     ACTIVE = True
+    HELP_URL = '/config/options_advanced.html'
 
     options = [
         config.TextOption("setting", "ignore_regex", ""),
@@ -43,6 +49,7 @@ class AdvancedOptionsPage(OptionsPage):
         config.BoolOption("setting", "completeness_ignore_pregap", False),
         config.BoolOption("setting", "completeness_ignore_data", False),
         config.BoolOption("setting", "completeness_ignore_silence", False),
+        config.ListOption("setting", "compare_ignore_tags", []),
     ]
 
     def __init__(self, parent=None):
@@ -60,6 +67,8 @@ class AdvancedOptionsPage(OptionsPage):
         self.ui.completeness_ignore_pregap.setChecked(config.setting["completeness_ignore_pregap"])
         self.ui.completeness_ignore_data.setChecked(config.setting["completeness_ignore_data"])
         self.ui.completeness_ignore_silence.setChecked(config.setting["completeness_ignore_silence"])
+        self.ui.compare_ignore_tags.update(config.setting["compare_ignore_tags"])
+        self.ui.compare_ignore_tags.set_user_sortable(False)
 
     def save(self):
         config.setting["ignore_regex"] = self.ui.ignore_regex.text()
@@ -70,6 +79,13 @@ class AdvancedOptionsPage(OptionsPage):
         config.setting["completeness_ignore_pregap"] = self.ui.completeness_ignore_pregap.isChecked()
         config.setting["completeness_ignore_data"] = self.ui.completeness_ignore_data.isChecked()
         config.setting["completeness_ignore_silence"] = self.ui.completeness_ignore_silence.isChecked()
+        tags = list(self.ui.compare_ignore_tags.tags)
+        if tags != config.setting["compare_ignore_tags"]:
+            config.setting["compare_ignore_tags"] = tags
+
+    def restore_defaults(self):
+        self.ui.compare_ignore_tags.clear()
+        super().restore_defaults()
 
 
 register_options_page(AdvancedOptionsPage)

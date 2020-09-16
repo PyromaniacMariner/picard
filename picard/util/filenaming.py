@@ -2,6 +2,14 @@
 #
 # Picard, the next-generation MusicBrainz tagger
 #
+# Copyright (C) 2013-2014 Ionuț Ciocîrlan
+# Copyright (C) 2013-2014, 2018-2019 Laurent Monin
+# Copyright (C) 2014 Michael Wiencek
+# Copyright (C) 2017 Sambhav Kothari
+# Copyright (C) 2017 Ville Skyttä
+# Copyright (C) 2018 Antonio Larrosa
+# Copyright (C) 2019 Philipp Wolfer
+#
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
 # as published by the Free Software Foundation; either version 2
@@ -15,6 +23,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
+
 
 import math
 import os
@@ -146,8 +155,8 @@ def shorten_path(path, length, mode):
     length: Maximum number of code points / bytes allowed in a node.
     mode: One of SHORTEN_BYTES, SHORTEN_UTF16, SHORTEN_UTF16_NFD.
     """
-    def shorten(n, l):
-        return n and shorten_filename(n, l, mode).strip() or ""
+    def shorten(name, length):
+        return name and shorten_filename(name, length, mode).strip() or ""
     dirpath, filename = os.path.split(path)
     fileroot, ext = os.path.splitext(filename)
     return os.path.join(
@@ -194,8 +203,8 @@ def _make_win_short_filename(relpath, reserved=0):
     remaining = MAX_DIRPATH_LEN - reserved
 
     # to make things more readable...
-    def shorten(p, l):
-        return shorten_path(p, l, mode=SHORTEN_UTF16)
+    def shorten(path, length):
+        return shorten_path(path, length, mode=SHORTEN_UTF16)
     xlength = _get_utf16_length
 
     # shorten to MAX_NODE_LEN from the beginning

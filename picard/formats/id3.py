@@ -1,7 +1,21 @@
 # -*- coding: utf-8 -*-
 #
 # Picard, the next-generation MusicBrainz tagger
-# Copyright (C) 2006-2007 Lukáš Lalinský
+#
+# Copyright (C) 2006-2009, 2011-2012 Lukáš Lalinský
+# Copyright (C) 2008-2011, 2014, 2018-2020 Philipp Wolfer
+# Copyright (C) 2009 Carlin Mangar
+# Copyright (C) 2011-2012 Johannes Weißl
+# Copyright (C) 2011-2014 Michael Wiencek
+# Copyright (C) 2011-2014 Wieland Hoffmann
+# Copyright (C) 2013 Calvin Walton
+# Copyright (C) 2013-2014, 2017-2019 Laurent Monin
+# Copyright (C) 2013-2015, 2017 Sophist-UK
+# Copyright (C) 2015 Frederik “Freso” S. Olesen
+# Copyright (C) 2016 Christoph Reiter
+# Copyright (C) 2016-2018 Sambhav Kothari
+# Copyright (C) 2017 tungol
+# Copyright (C) 2019 Zenara Daley
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -16,6 +30,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
+
 
 from collections import defaultdict
 import re
@@ -46,12 +61,10 @@ from picard.util import (
     encode_filename,
     sanitize_date,
 )
+from picard.util.tags import parse_comment_tag
 
 
 id3.GRP1 = compatid3.GRP1
-id3.TCMP = compatid3.TCMP
-id3.TSO2 = compatid3.TSO2
-id3.TSOC = compatid3.TSOC
 
 __IMAGE_TYPES = [
     ("obi", 0),
@@ -91,6 +104,14 @@ def image_type_as_id3_num(texttype):
 
 def types_from_id3(id3type):
     return [image_type_from_id3_num(id3type)]
+
+
+def _remove_people_with_role(tags, frames, role):
+    for frame in tags.values():
+        if frame.FrameID in frames:
+            for people in list(frame.people):
+                if people[0] == role:
+                    frame.people.remove(people)
 
 
 class ID3File(File):
@@ -139,6 +160,7 @@ class ID3File(File):
         'COMM': 'comment',
         'TOAL': 'originalalbum',
         'TOPE': 'originalartist',
+        'TOFN': 'originalfilename',
 
         # The following are informal iTunes extensions to id3v2:
         'TCMP': 'compilation',
@@ -253,7 +275,11 @@ class ID3File(File):
                 elif frameid == 'COMM':
                     for text in frame.text:
                         if text:
-                            metadata.add('%s:%s' % (name, frame.desc), text)
+                            if frame.lang == 'eng':
+                                name = '%s:%s' % (name, frame.desc)
+                            else:
+                                name = '%s:%s:%s' % (name, frame.lang, frame.desc)
+                            metadata.add(name, text)
                 else:
                     metadata.add(name, frame)
             elif frameid == 'TIT1':
@@ -398,6 +424,7 @@ class ID3File(File):
         for name, values in metadata.rawitems():
             values = [id3text(v, encoding) for v in values]
             name = id3text(name, encoding)
+            name_lower = name.lower()
 
             if not self.supports_tag(name):
                 continue
@@ -409,13 +436,13 @@ class ID3File(File):
                         tipl.people.append([role, value])
                     else:
                         tmcl.people.append([role, value])
-            elif name.startswith('comment:'):
-                desc = name.split(':', 1)[1]
+            elif name == 'comment' or name.startswith('comment:'):
+                (lang, desc) = parse_comment_tag(name)
                 if desc.lower()[:4] == 'itun':
                     tags.delall('COMM:' + desc)
                     tags.add(id3.COMM(encoding=0, desc=desc, lang='eng', text=[v + '\x00' for v in values]))
                 else:
-                    tags.add(id3.COMM(encoding=encoding, desc=desc, lang='eng', text=values))
+                    tags.add(id3.COMM(encoding=encoding, desc=desc, lang=lang, text=values))
             elif name.startswith('lyrics:') or name == 'lyrics':
                 if ':' in name:
                     desc = name.split(':', 1)[1]
@@ -475,11 +502,11 @@ class ID3File(File):
                         tags.delall('XSOP')
                     elif frameid == 'TSO2':
                         tags.delall('TXXX:ALBUMARTISTSORT')
-            elif name in self.__rtranslate_freetext_ci:
-                if name in self.__casemap:
-                    description = self.__casemap[name]
+            elif name_lower in self.__rtranslate_freetext_ci:
+                if name_lower in self.__casemap:
+                    description = self.__casemap[name_lower]
                 else:
-                    description = self.__rtranslate_freetext_ci[name]
+                    description = self.__rtranslate_freetext_ci[name_lower]
                 delall_ci(tags, 'TXXX:' + description)
                 tags.add(self.build_TXXX(encoding, description, values))
             elif name in self.__rtranslate_freetext:
@@ -521,51 +548,46 @@ class ID3File(File):
             try:
                 if name.startswith('performer:'):
                     role = name.split(':', 1)[1]
-                    for key, frame in tags.items():
-                        if frame.FrameID in ('TMCL', 'TIPL', 'IPLS'):
-                            for people in frame.people:
-                                if people[0] == role:
-                                    frame.people.remove(people)
-                elif name.startswith('comment:'):
-                    desc = name.split(':', 1)[1]
-                    if desc.lower()[:4] != 'itun':
-                        for key, frame in list(tags.items()):
-                            if frame.FrameID == 'COMM' and frame.desc == desc:
-                                del tags[key]
+                    _remove_people_with_role(tags, ['TMCL', 'TIPL', 'IPLS'], role)
+                elif name.startswith('comment:') or name == 'comment':
+                    (lang, desc) = parse_comment_tag(name)
+                    for key, frame in list(tags.items()):
+                        if (frame.FrameID == 'COMM' and frame.desc == desc
+                            and frame.lang == lang):
+                            del tags[key]
                 elif name.startswith('lyrics:') or name == 'lyrics':
                     if ':' in name:
                         desc = name.split(':', 1)[1]
                     else:
                         desc = ''
                     for key, frame in list(tags.items()):
-                        if frame.FrameID == desc:
+                        if frame.FrameID == 'USLT' and frame.desc == desc:
                             del tags[key]
                 elif name in self._rtipl_roles:
                     role = self._rtipl_roles[name]
-                    for key, frame in tags.items():
-                        if frame.FrameID in ('TIPL', 'IPLS'):
-                            for people in frame.people:
-                                if people[0] == role:
-                                    frame.people.remove(people)
+                    _remove_people_with_role(tags, ['TIPL', 'IPLS'], role)
                 elif name == 'musicbrainz_recordingid':
                     for key, frame in list(tags.items()):
                         if frame.FrameID == 'UFID' and frame.owner == 'http://musicbrainz.org':
                             del tags[key]
                 elif real_name == 'POPM':
+                    user_email = config.setting['rating_user_email']
                     for key, frame in list(tags.items()):
-                        if frame.FrameID == 'POPM' and frame.email == config.setting['rating_user_email']:
+                        if frame.FrameID == 'POPM' and frame.email == user_email:
                             del tags[key]
                 elif real_name in self.__translate:
                     del tags[real_name]
+                elif name.lower() in self.__rtranslate_freetext_ci:
+                    delall_ci(tags, 'TXXX:' + self.__rtranslate_freetext_ci[name.lower()])
                 elif real_name in self.__translate_freetext:
                     tags.delall('TXXX:' + real_name)
                     if real_name in self.__rrename_freetext:
                         tags.delall('TXXX:' + self.__rrename_freetext[real_name])
-                elif not name.startswith("~") and name not in self.__other_supported_tags:
+                elif not name.startswith("~id3:") and name not in self.__other_supported_tags:
                     tags.delall('TXXX:' + name)
-                elif name.startswith("~"):
-                    name = name[1:]
-                    tags.delall('TXXX:' + name)
+                elif name.startswith("~id3:"):
+                    frameid = name[5:]
+                    tags.delall(frameid)
                 elif name in self.__other_supported_tags:
                     del tags[real_name]
             except KeyError:
@@ -632,7 +654,6 @@ class ID3File(File):
             # ID3v23 can only save TDOR dates in YYYY format. Mutagen cannot
             # handle ID3v23 dates which are YYYY-MM rather than YYYY or
             # YYYY-MM-DD.
-
             if name == "originaldate":
                 values = [v[:4] for v in values]
             elif name == "date":
@@ -640,7 +661,6 @@ class ID3File(File):
 
             # If this is a multi-valued field, then it needs to be flattened,
             # unless it's TIPL or TMCL which can still be multi-valued.
-
             if (len(values) > 1 and name not in ID3File._rtipl_roles
                     and not name.startswith("performer:")):
                 values = [join_with.join(values)]
@@ -680,12 +700,8 @@ class TrueAudioFile(ID3File):
         return self._File(filename, ID3=compatid3.CompatID3)
 
 
-class DSFFile(ID3File):
-
-    """DSF file."""
-    EXTENSIONS = [".dsf", '.dff']
-    NAME = "DSF"
-    _File = mutagen.dsf.DSF
+class NonCompatID3File(ID3File):
+    """Base class for ID3 files which do not support setting `compatid3.CompatID3`."""
 
     def _get_file(self, filename):
         return self._File(filename, known_frames=compatid3.known_frames)
@@ -698,25 +714,39 @@ class DSFFile(ID3File):
 
     def _save_tags(self, tags, filename):
         if config.setting['write_id3v23']:
-            tags.update_to_v23()
+            compatid3.update_to_v23(tags)
             separator = config.setting['id3v23_join_with']
             tags.save(filename, v2_version=3, v23_sep=separator)
         else:
             tags.update_to_v24()
             tags.save(filename, v2_version=4)
 
-    @classmethod
-    def supports_tag(cls, name):
-        return (super().supports_tag(name)
-                and name not in {'albumsort',
-                                 'artistsort',
-                                 'discsubtitle',
-                                 'titlesort'})
+
+class DSFFile(NonCompatID3File):
+
+    """DSF file."""
+    EXTENSIONS = [".dsf"]
+    NAME = "DSF"
+    _File = mutagen.dsf.DSF
 
 
-class AiffFile(DSFFile):
+class AiffFile(NonCompatID3File):
 
     """AIFF file."""
     EXTENSIONS = [".aiff", ".aif", ".aifc"]
     NAME = "Audio Interchange File Format (AIFF)"
     _File = mutagen.aiff.AIFF
+
+
+try:
+    import mutagen.dsdiff
+
+    class DSDIFFFile(NonCompatID3File):
+
+        """DSF file."""
+        EXTENSIONS = [".dff"]
+        NAME = "DSDIFF"
+        _File = mutagen.dsdiff.DSDIFF
+
+except ImportError:
+    DSDIFFFile = None

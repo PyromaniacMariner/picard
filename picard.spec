@@ -11,16 +11,11 @@ sys.path.append('.')
 from picard import (
     PICARD_APP_ID,
     PICARD_APP_NAME,
+    PICARD_DISPLAY_NAME,
     PICARD_ORG_NAME,
     PICARD_VERSION,
     __version__,
 )
-
-pv = [str(x) for x in PICARD_VERSION]
-macos_picard_version = '.'.join(pv[:3])
-macos_picard_short_version = macos_picard_version
-if pv[3] != 'final':
-    macos_picard_version += pv[3][0] + ''.join(pv[4:])
 
 
 def _picard_get_locale_files():
@@ -55,18 +50,8 @@ data_files = get_locale_messages()
 
 fpcalc_name = 'fpcalc'
 if os_name == 'Windows':
-    from PyQt5.QtCore import QLibraryInfo
-    qt_binaries_path = QLibraryInfo.location(QLibraryInfo.BinariesPath)
     fpcalc_name = 'fpcalc.exe'
-    binaries += [
-        ('discid.dll', '.'),
-        # The following two lines should not be neccasary with PyInstaller 3.5
-        (os.path.join(qt_binaries_path, 'libeay32.dll'), '.'),
-        (os.path.join(qt_binaries_path, 'ssleay32.dll'), '.'),
-        # The following two lines should not be neccasary with PyInstaller >3.5
-        (os.path.join(qt_binaries_path, 'libcrypto-1_1-x64.dll'), '.'),
-        (os.path.join(qt_binaries_path, 'libssl-1_1-x64.dll'), '.'),
-    ]
+    binaries += [('discid.dll', '.')]
     data_files.append((os.path.join('resources', 'win10', '*'), '.'))
 
 if os_name == 'Darwin':
@@ -139,19 +124,52 @@ else:
                    upx=False,
                    name='picard')
 
-
     if os_name == 'Darwin':
         info_plist = {
+            'CFBundleName': PICARD_APP_NAME,
+            'CFBundleDisplayName': PICARD_DISPLAY_NAME,
+            'CFBundleIdentifier': PICARD_APP_ID,
+            'CFBundleVersion': '%d.%d.%d' % PICARD_VERSION[:3],
+            'CFBundleShortVersionString': PICARD_VERSION.to_string(short=True),
+            'LSApplicationCategoryType': 'public.app-category.music',
+            'LSMinimumSystemVersion': os.environ.get('MACOSX_DEPLOYMENT_TARGET', '10.12'),
             'NSHighResolutionCapable': 'True',
             'NSPrincipalClass': 'NSApplication',
-            'CFBundleName': PICARD_APP_NAME,
-            'CFBundleDisplayName': '{} {}'.format(PICARD_ORG_NAME,
-                                                  PICARD_APP_NAME),
-            'CFBundleIdentifier': PICARD_APP_ID,
-            'CFBundleVersion': macos_picard_version,
-            'CFBundleShortVersionString': macos_picard_short_version,
-            'LSMinimumSystemVersion': '10.12',
+            'CFBundleDocumentTypes': [{
+                # Add UTIs understood by macOS
+                'LSItemContentTypes': [
+                    'com.apple.m4a-audio',
+                    'com.apple.m4v-video',
+                    'com.apple.protected-mpeg-4-audio',
+                    'com.microsoft.advanced-systems-format',
+                    'com.microsoft.waveform-audio',
+                    'com.microsoft.windows-media-wm',
+                    'com.microsoft.windows-media-wma',
+                    'com.microsoft.windows-media-wmv',
+                    'org.xiph.flac',
+                    'public.aac-audio',
+                    'public.ac3-audio',
+                    'public.aifc-audio',
+                    'public.aiff-audio',
+                    'public.enhanced-ac3-audio',
+                    'public.folder',
+                    'public.midi-audio',
+                    'public.mp3',
+                    'public.mpeg-4',
+                    'public.mpeg-4-audio',
+                ],
+                'CFBundleTypeRole': 'Editor',
+            }],
         }
+
+        # Add additional supported file types by extension
+        from picard.formats import supported_formats
+        for extensions, name in supported_formats():
+            info_plist['CFBundleDocumentTypes'].append({
+                'CFBundleTypeExtensions': [ext[1:] for ext in extensions],
+                'CFBundleTypeRole': 'Editor',
+            })
+
         app = BUNDLE(coll,
                      name='{} {}.app'.format(PICARD_ORG_NAME, PICARD_APP_NAME),
                      icon='picard.icns',

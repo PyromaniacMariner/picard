@@ -1,4 +1,25 @@
 # -*- coding: utf-8 -*-
+#
+# Picard, the next-generation MusicBrainz tagger
+#
+# Copyright (C) 2013, 2018 Laurent Monin
+# Copyright (C) 2016 barami
+# Copyright (C) 2018 Wieland Hoffmann
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 2
+# of the License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
+
 
 from test.picardtestcase import PicardTestCase
 
@@ -26,27 +47,24 @@ class ParseAmazonUrlTest(PicardTestCase):
         self.assertEqual(r, expected)
 
     def test_4(self):
-        #incorrect ASIN
-        url = 'http://www.amazon.com/dp/A20530902X'
-        expected = None
-        r = parse_amazon_url(url)
-        self.assertEqual(r, expected)
-
-    def test_5(self):
-        #incorrect ASIN
-        url = 'http://www.amazon.com/dp/020530902x'
-        expected = None
-        r = parse_amazon_url(url)
-        self.assertEqual(r, expected)
-
-    def test_6(self):
         url = 'https://www.amazon.co.jp/gp/product/B00005FMYV'
         expected = {'asin': 'B00005FMYV', 'host': 'amazon.co.jp'}
         r = parse_amazon_url(url)
         self.assertEqual(r, expected)
 
-    def test_7(self):
-        #incorrect url scheme
+    def test_incorrect_asin_1(self):
+        url = 'http://www.amazon.com/dp/A20530902X'
+        expected = None
+        r = parse_amazon_url(url)
+        self.assertEqual(r, expected)
+
+    def test_incorrect_asin_2(self):
+        url = 'http://www.amazon.com/dp/020530902x'
+        expected = None
+        r = parse_amazon_url(url)
+        self.assertEqual(r, expected)
+
+    def test_incorrect_url_scheme(self):
         url = 'httpsa://www.amazon.co.jp/gp/product/B00005FMYV'
         expected = None
         r = parse_amazon_url(url)

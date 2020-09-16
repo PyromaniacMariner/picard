@@ -1,7 +1,16 @@
 # -*- coding: utf-8 -*-
 #
 # Picard, the next-generation MusicBrainz tagger
-# Copyright (C) 2006 Lukáš Lalinský
+#
+# Copyright (C) 2006-2007, 2014, 2017 Lukáš Lalinský
+# Copyright (C) 2008, 2014, 2019-2020 Philipp Wolfer
+# Copyright (C) 2012, 2017 Wieland Hoffmann
+# Copyright (C) 2012-2014 Michael Wiencek
+# Copyright (C) 2013-2016, 2018-2019 Laurent Monin
+# Copyright (C) 2016 Suhas
+# Copyright (C) 2016-2018 Sambhav Kothari
+# Copyright (C) 2017 Sophist-UK
+# Copyright (C) 2018 Vishal Choudhary
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -17,7 +26,10 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 
+
 from operator import itemgetter
+import os
+import shutil
 
 from PyQt5 import QtCore
 
@@ -26,10 +38,9 @@ from picard import (
     PICARD_ORG_NAME,
     PICARD_VERSION,
     log,
-    version_from_string,
-    version_to_string,
 )
 from picard.util import LockableObject
+from picard.version import Version
 
 
 class ConfigUpgradeError(Exception):
@@ -46,6 +57,7 @@ class ConfigSection(LockableObject):
         self.__name = name
         self.__prefix = self.__name + '/'
         self.__prefix_len = len(self.__prefix)
+        self._memoization = {}
 
     def key(self, name):
         return self.__prefix + name
@@ -64,7 +76,10 @@ class ConfigSection(LockableObject):
     def __setitem__(self, name, value):
         self.lock_for_write()
         try:
-            self.__qt_config.setValue(self.key(name), value)
+            key = self.key(name)
+            self.__qt_config.setValue(key, value)
+            if key in self._memoization:
+                self._memoization[key][0] = False
         finally:
             self.unlock()
 
@@ -75,7 +90,10 @@ class ConfigSection(LockableObject):
         self.lock_for_write()
         try:
             if name in self:
-                self.__qt_config.remove(self.key(name))
+                key = self.key(name)
+                self.__qt_config.remove(key)
+                if key in self._memoization:
+                    del self._memoization[key]
         finally:
             self.unlock()
 
@@ -83,23 +101,32 @@ class ConfigSection(LockableObject):
         """Return an option value without any type conversion."""
         key = self.key(name)
         if qtype is not None:
-            return self.__qt_config.value(key, type=qtype)
+            value = self.__qt_config.value(key, type=qtype)
         else:
-            return self.__qt_config.value(key)
+            value = self.__qt_config.value(key)
+        return value
 
     def value(self, name, option_type, default=None):
         """Return an option value converted to the given Option type."""
-        self.lock_for_read()
-        try:
-            if name in self:
-                value = self.raw_value(name, qtype=option_type.qtype)
-                return option_type.convert(value)
-            return default
-        except Exception as why:
-            log.error('Cannot read %s value: %s', self.key(name), why, exc_info=True)
-            return default
-        finally:
-            self.unlock()
+        if name in self:
+            key = self.key(name)
+            try:
+                valid, value = self._memoization[key]
+            except KeyError:
+                valid = False
+
+            if not valid:
+                self.lock_for_read()
+                try:
+                    value = self.raw_value(name, qtype=option_type.qtype)
+                    value = option_type.convert(value)
+                    self._memoization[key] = [True, value]
+                except Exception as why:
+                    log.error('Cannot read %s value: %s', self.key(name), why, exc_info=True)
+                    value = default
+                self.unlock()
+            return value
+        return default
 
 
 class Config(QtCore.QSettings):
@@ -120,7 +147,7 @@ class Config(QtCore.QSettings):
         self.current_preset = "default"
 
         TextOption("application", "version", '0.0.0dev0')
-        self._version = version_from_string(self.application["version"])
+        self._version = Version.from_string(self.application["version"])
         self._upgrade_hooks = dict()
         # Save known config names for faster access and to prevent
         # strange cases of Qt locking up when accessing QSettings.allKeys()
@@ -138,6 +165,11 @@ class Config(QtCore.QSettings):
                                   QtCore.QSettings.UserScope, PICARD_ORG_NAME,
                                   PICARD_APP_NAME, parent)
 
+        # Check if there is a config file specifically for this version
+        versioned_config_file = this._versioned_config_filename(PICARD_VERSION)
+        if os.path.isfile(versioned_config_file):
+            return cls.from_file(parent, versioned_config_file)
+
         # If there are no settings, copy existing settings from old format
         # (registry on windows systems)
         if not this.allKeys():
@@ -147,6 +179,7 @@ class Config(QtCore.QSettings):
             this.sync()
 
         this.__initialize()
+        this._backup_settings()
         return this
 
     @classmethod
@@ -182,7 +215,7 @@ class Config(QtCore.QSettings):
 
     def register_upgrade_hook(self, func, *args):
         """Register a function to upgrade from one config version to another"""
-        to_version = version_from_string(func.__name__)
+        to_version = Version.from_string(func.__name__)
         assert to_version <= PICARD_VERSION, "%r > %r !!!" % (to_version, PICARD_VERSION)
         self._upgrade_hooks[to_version] = {
             'func': func,
@@ -198,8 +231,8 @@ class Config(QtCore.QSettings):
             if self._version > PICARD_VERSION:
                 print("Warning: config file %s was created by a more recent "
                       "version of Picard (current is %s)" % (
-                          version_to_string(self._version),
-                          version_to_string(PICARD_VERSION)
+                          self._version.to_string(),
+                          PICARD_VERSION.to_string()
                       ))
             return
         for version in sorted(self._upgrade_hooks):
@@ -208,8 +241,8 @@ class Config(QtCore.QSettings):
                 try:
                     if outputfunc and hook['func'].__doc__:
                         outputfunc("Config upgrade %s -> %s: %s" % (
-                                   version_to_string(self._version),
-                                   version_to_string(version),
+                                   self._version.to_string(),
+                                   version.to_string(),
                                    hook['func'].__doc__.strip()))
                     hook['func'](self, *hook['args'])
                 except BaseException:
@@ -217,8 +250,8 @@ class Config(QtCore.QSettings):
                     raise ConfigUpgradeError(
                         "Error during config upgrade from version %s to %s "
                         "using %s():\n%s" % (
-                            version_to_string(self._version),
-                            version_to_string(version),
+                            self._version.to_string(),
+                            version.to_string(),
                             hook['func'].__name__,
                             traceback.format_exc()
                         ))
@@ -235,9 +268,24 @@ class Config(QtCore.QSettings):
             self._version = PICARD_VERSION
             self._write_version()
 
+    def _backup_settings(self):
+        if Version(0, 0, 0) < self._version < PICARD_VERSION:
+            backup_path = self._versioned_config_filename()
+            log.info('Backing up config file to %s', backup_path)
+            try:
+                shutil.copyfile(self.fileName(), backup_path)
+            except OSError:
+                log.error('Failed backing up config file to %s', backup_path)
+
     def _write_version(self):
-        self.application["version"] = version_to_string(self._version)
+        self.application["version"] = self._version.to_string()
         self.sync()
+
+    def _versioned_config_filename(self, version=None):
+        if not version:
+            version = self._version
+        return os.path.join(os.path.dirname(self.fileName()), '%s-%s.ini' % (
+            self.applicationName(), version.to_string(short=True)))
 
 
 class Option(QtCore.QObject):

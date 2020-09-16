@@ -1,8 +1,26 @@
 # -*- coding: utf-8 -*-
 #
 # Picard, the next-generation MusicBrainz tagger
+#
 # Copyright (C) 2004 Robert Kaye
-# Copyright (C) 2006 Lukáš Lalinský
+# Copyright (C) 2006-2009, 2011-2012, 2014 Lukáš Lalinský
+# Copyright (C) 2008-2011, 2014, 2018-2020 Philipp Wolfer
+# Copyright (C) 2009 Carlin Mangar
+# Copyright (C) 2009 david
+# Copyright (C) 2010 fatih
+# Copyright (C) 2011-2013 Michael Wiencek
+# Copyright (C) 2012, 2014-2015 Wieland Hoffmann
+# Copyright (C) 2013 Ionuț Ciocîrlan
+# Copyright (C) 2013-2014 Sophist-UK
+# Copyright (C) 2013-2014, 2018-2020 Laurent Monin
+# Copyright (C) 2014 Johannes Dewender
+# Copyright (C) 2016 Rahul Raturi
+# Copyright (C) 2016 barami
+# Copyright (C) 2016-2018 Sambhav Kothari
+# Copyright (C) 2017 Frederik “Freso” S. Olesen
+# Copyright (C) 2018 Bob Swift
+# Copyright (C) 2018 Vishal Choudhary
+# Copyright (C) 2020 Ray Bouchard
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -17,8 +35,11 @@
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
+
+
 import builtins
 from collections import namedtuple
+from collections.abc import Mapping
 import html
 import json
 import ntpath
@@ -29,9 +50,11 @@ import sys
 from time import time
 import unicodedata
 
+from dateutil.parser import parse
+
 from PyQt5 import QtCore
 
-# Required for compatibility with lastfmplus which imports this from here rather than loading it direct.
+from picard import log
 from picard.const import MUSICBRAINZ_SERVERS
 from picard.const.sys import (
     FROZEN_TEMP_PATH,
@@ -69,12 +92,11 @@ _io_encoding = sys.getfilesystemencoding()
 
 
 # The following was adapted from k3b's source code:
-#// On a glibc system the system locale defaults to ANSI_X3.4-1968
-#// It is very unlikely that one would set the locale to ANSI_X3.4-1968
-#// intentionally
+# On a glibc system the system locale defaults to ANSI_X3.4-1968
+# It is very unlikely that one would set the locale to ANSI_X3.4-1968
+# intentionally
 def check_io_encoding():
     if _io_encoding == "ANSI_X3.4-1968":
-        from picard import log
         log.warning("""
 System locale charset is ANSI_X3.4-1968
 Your system's locale charset (i.e. the charset used to encode filenames)
@@ -163,9 +185,13 @@ def strip_non_alnum(string):  # noqa: E302
     return _re_non_alphanum.sub(" ", string).strip()
 
 
-_re_slashes = re.compile(r'[\\/]', re.UNICODE)
-def sanitize_filename(string, repl="_"):  # noqa: E302
-    return _re_slashes.sub(repl, string)
+def sanitize_filename(string, repl="_", win_compat=False):
+    string = string.replace(os.sep, repl)
+    if os.altsep:
+        string = string.replace(os.altsep, repl)
+    if win_compat and os.altsep != '\\':
+        string = string.replace('\\', repl)
+    return string
 
 
 def _reverse_sortname(sortname):
@@ -296,16 +322,16 @@ def uniqify(seq):
 _tracknum_regexps = (
     # search for explicit track number (prefix "track")
     r"track[\s_-]*(?:no|nr)?[\s_-]*(\d+)",
-    # search for 2-digit number at start of string
-    r"^(\d{2})\D?",
-    # search for 2-digit number at end of string
-    r"\D?(\d{2})$",
+    # search for 2-digit number at start of string
+    r"^(\d{2})\D",
+    # search for 2-digit number at end of string
+    r"\D(\d{2})$",
 )
 
 
 def tracknum_from_filename(base_filename):
     """Guess and extract track number from filename
-    Returns -1 if none found, the number as integer else
+    Returns `None` if none found, the number as integer else
     """
     filename, _ = os.path.splitext(base_filename)
     for r in _tracknum_regexps:
@@ -321,7 +347,7 @@ def tracknum_from_filename(base_filename):
                       0 < int(n) <= 99])
     if numbers:
         return numbers[0]
-    return -1
+    return None
 
 
 # Provide os.path.samefile equivalent which is missing in Python under Windows
@@ -386,13 +412,10 @@ def album_artist_from_path(filename, album, artist):
     """
     if not album:
         dirs = os.path.dirname(filename).replace('\\', '/').lstrip('/').split('/')
-        if len(dirs) == 0:
-            return album, artist
         # Strip disc subdirectory from list
-        if len(dirs) > 0:
-            if re.search(r'(^|\s)(CD|DVD|Disc)\s*\d+(\s|$)', dirs[-1], re.I):
-                del dirs[-1]
-        if len(dirs) > 0:
+        if re.search(r'\b(?:CD|DVD|Disc)\s*\d+\b', dirs[-1], re.I):
+            del dirs[-1]
+        if dirs:
             # For clustering assume %artist%/%album%/file or %artist% - %album%/file
             album = dirs[-1]
             if ' - ' in album:
@@ -481,7 +504,6 @@ def __convert_to_string(obj):
 
 
 def convert_to_string(obj):
-    from picard import log
     log.warning("string_() and convert_to_string() are deprecated, do not use")
     return __convert_to_string(obj)
 
@@ -516,45 +538,6 @@ def restore_method(func):
         if not QtCore.QObject.tagger._no_restore:
             return func(*args, **kwargs)
     return func_wrapper
-
-
-def compare_version_tuples(version1, version2):
-    """Compare Versions
-
-    Compares two Picard version tuples to determine whether the second tuple
-    contains a higher version number than the first tuple.
-
-    Args:
-        version1: The first version tuple to compare.  This will be used as
-                  the base for the comparison.
-        version2: The version tuple to be compared to the base version.
-
-    Returns:
-        -1 if version2 is lower than version1
-        0 if version2 is the same as version1
-        1 if version2 is higher than version1
-
-    Raises:
-        none
-    """
-
-    # Create test copies that can be modified
-    test1 = list(version1)
-    test2 = list(version2)
-
-    # Set sort order for release type element
-    test1[3] = 1 if test1[3] == 'final' else 0
-    if test1[3]:
-        test1[4] = 0
-    test2[3] = 1 if test2[3] == 'final' else 0
-    if test2[3]:
-        test2[4] = 0
-
-    # Compare elements in order
-    for x in range(0, 5):
-        if test1[x] != test2[x]:
-            return 1 if test1[x] < test2[x] else -1
-    return 0
 
 
 def reconnect(signal, newhandler=None, oldhandler=None):
@@ -628,3 +611,51 @@ def get_qt_enum(cls, enum):
         if isinstance(value, enum):
             values.append(key)
     return values
+
+
+def limited_join(a_list, limit, join_string='+', middle_string='…'):
+    """Join elements of a list with `join_string`
+    If list is longer than `limit`, middle elements will be dropped,
+    and replaced by `middle_string`.
+
+    Args:
+        a_list: list of strings to join
+        limit: maximum number of elements to join before limiting
+        join_string: string used to join elements
+        middle_string: string to insert in the middle if limited
+
+    Returns:
+        A string
+
+    Example:
+        >>> limited_join(['a', 'b', 'c', 'd', 'e', 'f'], 2)
+        'a+…+f'
+        >>> limited_join(['a', 'b', 'c', 'd', 'e', 'f'], 3)
+        'a+…+f'
+        >>> limited_join(['a', 'b', 'c', 'd', 'e', 'f'], 4)
+        'a+b+…+e+f'
+        >>> limited_join(['a', 'b', 'c', 'd', 'e', 'f'], 6)
+        'a+b+c+d+e+f'
+        >>> limited_join(['a', 'b', 'c', 'd', 'e', 'f'], 2, ',', '?')
+        'a,?,f'
+    """
+    length = len(a_list)
+    if limit <= 1 or limit >= length:
+        return join_string.join(a_list)
+
+    half = limit // 2
+    start = a_list[:half]
+    end = a_list[-half:]
+    return join_string.join(start + [middle_string] + end)
+
+
+def extract_year_from_date(dt):
+    """ Extracts year from  passed in date either dict or string """
+
+    try:
+        if isinstance(dt, Mapping):
+            return int(dt.get('year'))
+        else:
+            return parse(dt).year
+    except (TypeError, ValueError):
+        return None

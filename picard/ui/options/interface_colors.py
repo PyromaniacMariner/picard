@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 #
 # Picard, the next-generation MusicBrainz tagger
+#
 # Copyright (C) 2019 Laurent Monin
+# Copyright (C) 2019 Philipp Wolfer
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -16,6 +18,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
+
 
 from functools import partial
 
@@ -64,7 +67,7 @@ class ColorButton(QtWidgets.QPushButton):
 
 def delete_items_of_layout(layout):
     # Credits:
-    # https://stackoverflow.com/a/45790404
+    # https://stackoverflow.com/a/45790404
     # https://riverbankcomputing.com/pipermail/pyqt/2009-November/025214.html
     if layout is not None:
         while layout.count():
@@ -83,6 +86,7 @@ class InterfaceColorsOptionsPage(OptionsPage):
     PARENT = "interface"
     SORT_ORDER = 30
     ACTIVE = True
+    HELP_URL = '/config/options_interface_colors.html'
 
     options = [
         config.Option("setting", "interface_colors", interface_colors.get_colors()),
@@ -128,9 +132,7 @@ class InterfaceColorsOptionsPage(OptionsPage):
         self.update_color_selectors()
 
     def save(self):
-        new_colors = interface_colors.get_colors()
-        if new_colors != config.setting['interface_colors']:
-            config.setting['interface_colors'] = new_colors
+        if interface_colors.save_to_config():
             dialog = QtWidgets.QMessageBox(
                 QtWidgets.QMessageBox.Information,
                 _('Colors changed'),

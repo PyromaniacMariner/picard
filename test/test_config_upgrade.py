@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 #
 # Picard, the next-generation MusicBrainz tagger
+#
 # Copyright (C) 2019 Laurent Monin
+# Copyright (C) 2019 Philipp Wolfer
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -16,6 +18,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
+
 
 from test.test_config import TestPicardConfigCommon
 
@@ -42,6 +45,8 @@ from picard.config_upgrade import (
     upgrade_to_v2_1_0_dev_1,
     upgrade_to_v2_2_0_dev_3,
     upgrade_to_v2_2_0_dev_4,
+    upgrade_to_v2_4_0_beta_3,
+    upgrade_to_v2_5_0_dev_1,
 )
 from picard.const import (
     DEFAULT_FILE_NAMING_FORMAT,
@@ -245,3 +250,25 @@ class TestPicardConfigUpgrades(TestPicardConfigCommon):
         self.config.setting['file_naming_format'] = OLD_DEFAULT_FILE_NAMING_FORMAT_v2_1
         upgrade_to_v2_2_0_dev_4(self.config)
         self.assertEqual(DEFAULT_FILE_NAMING_FORMAT, self.config.setting['file_naming_format'])
+
+    def test_upgrade_to_v2_4_0_beta_3(self):
+        ListOption("setting", "preserved_tags", [])
+        self.config.setting['preserved_tags'] = 'foo,bar'
+        upgrade_to_v2_4_0_beta_3(self.config)
+        self.assertEqual(['foo', 'bar'], self.config.setting['preserved_tags'])
+
+    def test_upgrade_to_v2_5_0_dev_1(self):
+        ListOption("setting", "ca_providers", [])
+
+        self.config.setting['ca_providers'] = [
+            ('Cover Art Archive', True),
+            ('Whitelist', True),
+            ('Local', False),
+        ]
+        expected = [
+            ('Cover Art Archive', True),
+            ('UrlRelationships', True),
+            ('Local', False),
+        ]
+        upgrade_to_v2_5_0_dev_1(self.config)
+        self.assertEqual(expected, self.config.setting['ca_providers'])
